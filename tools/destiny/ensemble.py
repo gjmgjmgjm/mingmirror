@@ -8,6 +8,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from tools.destiny.aligner import align
 from tools.destiny.conflict_resolver import overall_confidence, resolve_domain
 from tools.destiny.contract import ChartInfo, DomainConclusion, SystemResult
+from tools.destiny.strategies.debate import DebateStrategy
+from tools.destiny.strategies.reflection import ReflectionStrategy
+from tools.destiny.strategies.tool_caller import ToolCaller
 
 SystemCallable = Callable[[ChartInfo, str], Awaitable[Dict[str, Any]]]
 
@@ -61,10 +64,14 @@ class MultiDestinyAnalyzer:
         systems: Optional[List[str]] = None,
         callables: Optional[Dict[str, SystemCallable]] = None,
         config: Optional[Dict[str, Any]] = None,
+        strategy: str = "single",
     ):
         self.systems = list(systems or ["bazi", "ziwei", "qizheng"])
         self.callables = dict(callables or _load_default_callables())
         self.config = dict(config or {})
+        self.strategy = strategy if strategy in (
+            "single", "reflection", "debate", "tool_augmented"
+        ) else "single"
 
     def _get_callable(self, system: str) -> Optional[SystemCallable]:
         if system in self.callables:
@@ -113,6 +120,26 @@ class MultiDestinyAnalyzer:
 
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Apply reflection to each successful system result when requested.
+        if self.strategy == "reflection":
+            reflector = ReflectionStrategy()
+            reflected = []
+            for system, raw in zip(self.systems, raw_results):
+                if isinstance(raw, dict):
+                    raw = await reflector.reflect(system, raw, chart_info)
+                reflected.append(raw)
+            raw_results = reflected
+
+        # Apply rule-based tool validation to inject feedback into reasoning.
+        if self.strategy == "tool_augmented":
+            tool_caller = ToolCaller(chart_info)
+            augmented = []
+            for system, raw in zip(self.systems, raw_results):
+                if isinstance(raw, dict):
+                    raw = tool_caller.apply(raw)
+                augmented.append(raw)
+            raw_results = augmented
+
         system_results: List[SystemResult] = []
         for system, raw in zip(self.systems, raw_results):
             if isinstance(raw, BaseException):
@@ -134,12 +161,29 @@ class MultiDestinyAnalyzer:
             )
 
         aligned = self._build_aligned(system_results)
+
+        # Debate strategy: let subsystems challenge each other and refine consensus.
+        if self.strategy == "debate":
+            debate = DebateStrategy()
+            debate_consensus = await debate.debate(
+                chart_info,
+                {sr.system: sr.domain_conclusions for sr in system_results},
+            )
+            for domain, entry in debate_consensus.items():
+                if domain in aligned and entry.get("text"):
+                    aligned[domain] = {
+                        "consensus": entry["text"],
+                        "confidence": entry.get("confidence", "medium"),
+                        "dissent": aligned[domain].get("dissent", []),
+                        "_debate": True,
+                    }
+
         overall = overall_confidence(
             [v["confidence"] for v in aligned.values() if v.get("consensus")]
         )
         summary = self._build_summary(chart_info, aligned, question)
 
-        return {
+        result = {
             "bazi": chart_info.bazi,
             "question": question,
             "per_system": [sr.to_dict() for sr in system_results],
@@ -147,6 +191,9 @@ class MultiDestinyAnalyzer:
             "final_summary": summary,
             "overall_confidence": overall,
         }
+        if self.strategy != "single":
+            result["strategy"] = self.strategy
+        return result
 
     async def _run_with_error_handling(
         self,

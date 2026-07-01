@@ -20,7 +20,10 @@ from typing import Any, Dict, List, Optional
 
 import aiofiles
 
-from tools.qizheng.prompts import build_system_prompt, build_user_prompt
+from tools.qizheng.prompts import (
+    build_system_prompt,
+    build_user_prompt,
+)
 from utils.logger import setup_logger
 
 logger = setup_logger("QiZhengAnalyzer")
@@ -206,6 +209,8 @@ class QiZhengAnalyzer:
     ):
         self.rule_primer_path = rule_primer_path
         self.cases_path = cases_path
+        package_dir = Path(__file__).resolve().parent
+        self.examples_path = package_dir / "examples.jsonl"
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
@@ -244,7 +249,12 @@ class QiZhengAnalyzer:
             chart, question, self.cases_path, self.top_k
         )
         system_prompt = await build_system_prompt(self.rule_primer_path)
-        user_prompt = build_user_prompt(chart, question, similar_cases)
+        from tools.qizheng.prompts import _load_few_shot_examples
+
+        few_shot_examples = _load_few_shot_examples(self.examples_path)
+        user_prompt = build_user_prompt(
+            chart, question, similar_cases, few_shot_examples=few_shot_examples
+        )
 
         key = self.api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not key:

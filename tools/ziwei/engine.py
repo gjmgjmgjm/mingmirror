@@ -10,7 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from tools.ziwei.prompts import build_system_prompt, build_user_prompt, retrieve_cases
+from tools.ziwei.prompts import (
+    build_system_prompt,
+    build_user_prompt,
+    retrieve_cases,
+)
 from utils.logger import setup_logger
 
 logger = setup_logger("ZiWeiAnalyzer")
@@ -44,6 +48,7 @@ class ZiWeiAnalyzer:
         package_dir = Path(__file__).resolve().parent
         self.rule_primer_path = rule_primer_path or package_dir / "rule_primer.md"
         self.cases_path = cases_path or package_dir / "cases.jsonl"
+        self.examples_path = package_dir / "examples.jsonl"
 
     async def analyze(
         self,
@@ -62,7 +67,12 @@ class ZiWeiAnalyzer:
             top_k=self.top_k,
         )
         system_prompt = await build_system_prompt(self.rule_primer_path)
-        user_prompt = build_user_prompt(chart_info, question, similar_cases)
+        from tools.ziwei.prompts import _load_few_shot_examples
+
+        few_shot_examples = _load_few_shot_examples(self.examples_path)
+        user_prompt = build_user_prompt(
+            chart_info, question, similar_cases, few_shot_examples=few_shot_examples
+        )
 
         key = self.api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not key:

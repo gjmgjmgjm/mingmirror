@@ -1,5 +1,8 @@
-# Optional dependencies for destiny analysis subsystems (ziwei, bazi, etc.)
-# The Zi Wei Dou Shu analyzer currently relies only on core dependencies
-# (aiohttp for the DeepSeek API call), which are listed in requirements.txt.
+# Optional dependencies for destiny analysis subsystems (ziwei, qizheng, bazi ensemble).
+#
+# Core dependencies (aiohttp, aiofiles) are already listed in requirements.txt.
 # Install core dependencies first:
 #   pip install -r requirements.txt
+#
+# Optional enhancement:
+#   sentence-transformers  # enables dense semantic retrieval in tools/destiny/strategies/retriever.py

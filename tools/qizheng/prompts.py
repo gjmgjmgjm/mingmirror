@@ -1,5 +1,6 @@
 """Prompt templates for the Qi Zheng Si Yu analyzer."""
 
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -51,10 +52,35 @@ async def build_system_prompt(rule_primer_path: Optional[Path]) -> str:
 """
 
 
+def _load_few_shot_examples(examples_path: Optional[Path]) -> List[Dict]:
+    """Load few-shot examples from a JSONL file."""
+    if examples_path is None or not examples_path.exists():
+        return []
+    examples: List[Dict] = []
+    with examples_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                examples.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return examples
+
+
+def _format_example(example: Dict) -> str:
+    """Format a few-shot example for prompt inclusion."""
+    chart = example.get("chart", "")
+    output = json.dumps(example.get("output", {}), ensure_ascii=False, indent=2)
+    return f"""输入：\n命盘：{chart}\n\n输出：\n{output}"""
+
+
 def build_user_prompt(
     chart: str,
     question: str,
     similar_cases: List[Dict],
+    few_shot_examples: Optional[List[Dict]] = None,
 ) -> str:
     """Return the user prompt for a specific chart and question."""
     cases_text = "\n\n".join(
@@ -63,6 +89,16 @@ def build_user_prompt(
     )
     if not cases_text:
         cases_text = "（暂无相似案例）"
+
+    examples_text = "\n\n".join(
+        f"示例 {i + 1}：\n{_format_example(ex)}"
+        for i, ex in enumerate(few_shot_examples or [])
+    )
+    examples_section = (
+        f"\n\n以下是 few-shot 示例（仅作格式与风格参考）：\n{examples_text}"
+        if examples_text
+        else ""
+    )
 
     focus_instruction = (
         "请全面分析事业、财运、婚姻、健康四个领域。"
@@ -77,7 +113,7 @@ def build_user_prompt(
 {focus_instruction}
 
 参考案例（仅作风格与论证参考，不要直接照搬结论）：
-{cases_text}
+{cases_text}{examples_section}
 
 请按以下 JSON 格式输出（不要输出 markdown 代码块，只输出 JSON）：
 {{

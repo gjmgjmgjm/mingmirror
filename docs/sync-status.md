@@ -73,7 +73,10 @@ N/A（本次无法执行有效对比）
 ## 本次本地验证结果
 
 - `ruff check .`：All checks passed!
-- `python -m pytest tests/ -q`：**517 passed**（56 个测试模块）
+- `python -m pytest tests/ -q`：**567 passed**（60 个测试模块）
+- 新增 `tools/destiny/strategies/`（reflection / debate / tool_caller / retriever）、`tools/destiny/benchmark_v2.py`、40 条人工标注案例与对应测试
+- `MultiDestinyAnalyzer` 新增 `strategy` 参数，默认 `"single"` 保持向后兼容
+- `tools/ziwei/` 与 `tools/qizheng/` 增加 `examples.jsonl` few-shot 示例
 
 ## 备注
 

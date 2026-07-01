@@ -30,6 +30,12 @@ Standalone utility scripts — not part of the core download pipeline.
 | `bazi_ai/evaluator.py` | Consistency, format, case overlap, and leave-one-out benchmark evaluator |
 | `bazi_ai/benchmark.py` | CLI wrapper for `evaluate_leave_one_out()` |
 | `bazi_ai/cli.py` | Standalone CLI for `python -m tools.bazi_ai.cli` |
+| `destiny/ensemble.py` | Multi-destiny analyzer with pluggable agent strategies |
+| `destiny/benchmark_v2.py` | Quantitative benchmark against human-annotated cases |
+| `destiny/strategies/reflection.py` | Self-critique and revision strategy |
+| `destiny/strategies/debate.py` | Multi-system debate and consensus strategy |
+| `destiny/strategies/tool_caller.py` | Rule-validation feedback strategy |
+| `destiny/strategies/retriever.py` | Cross-system case retrieval (keyword + optional embeddings) |
 | `frontend-handoff.md` | Handoff doc for the independent modern frontend developer |
 
 ## For AI Agents
@@ -43,6 +49,9 @@ Standalone utility scripts — not part of the core download pipeline.
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
 - Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
 - Destiny analyzers (`tools/ziwei/`, `tools/qizheng/`, `tools/destiny/`) are optional and currently rely on core dependencies only; `requirements-destiny.txt` is a placeholder
+- `tools/destiny/strategies/` provides agent strategies: `reflection.py`, `debate.py`, `tool_caller.py`, `retriever.py`
+- `tools/destiny/benchmark_v2.py` runs quantitative evaluation against `tools/destiny/benchmark_data/annotated_cases.jsonl` and writes `benchmark_report.json`
+- `tools/destiny/ensemble.py` supports `strategy="single"|"reflection"|"debate"|"tool_augmented"`; default remains `"single"`
 - `build_knowledge_base*.py` have been parameterized; use `--glossary`, `--users`, `--output-dir`, `--base-dir` instead of hard-coded paths
 - Hard-coded absolute paths in `batch_bazi_extract*.py` should be parameterized before reuse
 
@@ -53,6 +62,7 @@ Standalone utility scripts — not part of the core download pipeline.
 - Tests: `tests/test_bazi_cli.py` covers the reusable backend
 - Tests: `tests/test_bazi_validator.py`, `tests/test_bazi_ai.py`, `tests/test_bazi_ai_evaluator.py` cover validation, RAG, and evaluation
 - Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
+- Tests: `tests/test_destiny_reflection.py`, `tests/test_destiny_debate.py`, `tests/test_destiny_benchmark_v2.py` cover the new agent strategies and benchmark
 
 ### Common Patterns
 - Playwright async API for browser automation
