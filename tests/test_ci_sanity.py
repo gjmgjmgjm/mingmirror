@@ -67,8 +67,66 @@ def test_requirements_files_present_and_non_empty():
         assert non_comment_lines, f"{name} has no real dependency lines"
 
 
+def test_requirements_bazi_file_present_and_non_empty():
+    """requirements-bazi.txt must exist and have content (cached by CI)."""
+    req_file = PROJECT_ROOT / "requirements-bazi.txt"
+    assert req_file.exists(), "missing requirements-bazi.txt"
+    text = _read_text(req_file)
+    non_comment_lines = [
+        line for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert non_comment_lines, "requirements-bazi.txt has no real dependency lines"
+
+
 def test_dockerfile_exists():
     """Dockerfile must exist for the docker CI job to be meaningful."""
     dockerfile = PROJECT_ROOT / "Dockerfile"
     assert dockerfile.exists(), "missing Dockerfile"
     assert "FROM" in _read_text(dockerfile)
+
+
+def test_server_routes_are_registered(tmp_path: Path):
+    """server/app.py should register the expected REST endpoints."""
+    pytest.importorskip("fastapi")
+
+    from fastapi.testclient import TestClient
+
+    from config import ConfigLoader
+    from server.app import build_app
+
+    config_path = tmp_path / "config.yml"
+    download_path = tmp_path / "Downloaded"
+    config_path.write_text(
+        f"path: {download_path}\n"
+        "mode: [post]\n"
+        "link: []\n"
+        "thread: 5\n"
+        "rate_limit: 2\n"
+        "retry_times: 3\n",
+        encoding="utf-8",
+    )
+    config = ConfigLoader(str(config_path))
+    app = build_app(config)
+
+    registered = {route.path for route in app.routes if hasattr(route, "path")}
+    expected = {
+        "/api/v1/health",
+        "/api/v1/download",
+        "/api/v1/jobs",
+        "/api/v1/jobs/{job_id}",
+        "/api/v1/jobs/{job_id}/events",
+        "/api/v1/config",
+        "/api/v1/bazi/analyze",
+        "/api/v1/bazi/cases",
+        "/api/v1/bazi/extract",
+        "/api/v1/bazi/feedback",
+    }
+    for path in expected:
+        assert path in registered, f"missing route {path}"
+
+    # Smoke-test the health endpoint without starting a real server.
+    client = TestClient(app)
+    resp = client.get("/api/v1/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
