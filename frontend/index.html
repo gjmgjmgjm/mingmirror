@@ -25,6 +25,22 @@
       --shadow: 0 14px 50px rgba(44, 40, 36, 0.12);
     }
 
+    html[data-theme="dark"] {
+      --ink-900: #161412;
+      --ink-800: #1f1c19;
+      --ink-700: #2a2622;
+      --paper: #f4f1ea;
+      --paper-dim: rgba(244, 241, 234, 0.06);
+      --vermilion: #d44a3a;
+      --vermilion-glow: rgba(212, 74, 58, 0.28);
+      --gold: #d4b04a;
+      --gold-dim: rgba(212, 176, 74, 0.16);
+      --jade: #6aa88d;
+      --text: #e8e3d8;
+      --text-dim: #9f9a8e;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+    }
+
     * { box-sizing: border-box; }
 
     html, body {
@@ -100,6 +116,26 @@
       border-radius: 50%;
       background: var(--jade);
       box-shadow: 0 0 10px var(--jade);
+    }
+
+    .theme-toggle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid rgba(128, 128, 128, 0.25);
+      background: var(--ink-800);
+      color: var(--text);
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s, box-shadow 0.2s;
+    }
+
+    .theme-toggle:hover {
+      transform: scale(1.08);
+      box-shadow: 0 4px 14px var(--vermilion-glow);
     }
 
     main {
@@ -423,9 +459,12 @@
         <h1>命盘</h1>
         <span>多学派命理分析工作台</span>
       </div>
-      <div class="status">
-        <div class="status-dot"></div>
-        <span id="statusText">等待输入</span>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <button id="themeToggle" class="theme-toggle" title="切换主题">🌙</button>
+        <div class="status">
+          <div class="status-dot"></div>
+          <span id="statusText">等待输入</span>
+        </div>
       </div>
     </header>
     <main>
@@ -659,11 +698,32 @@
       }
     }
 
+    function initTheme() {
+      const saved = localStorage.getItem("mingpan-theme");
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const theme = saved || (prefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+      updateThemeIcon(theme);
+    }
+
+    function updateThemeIcon(theme) {
+      el("themeToggle").textContent = theme === "dark" ? "☀️" : "🌙";
+    }
+
+    el("themeToggle").addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "light";
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("mingpan-theme", next);
+      updateThemeIcon(next);
+    });
+
     el("analyzeBtn").addEventListener("click", analyze);
     el("feedback").querySelectorAll("button").forEach(btn => {
       btn.addEventListener("click", () => sendFeedback(btn.dataset.correct === "true"));
     });
 
+    initTheme();
     fetchCases();
   </script>
 </body>
