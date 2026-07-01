@@ -1,0 +1,5 @@
+# Optional dependencies for destiny analysis subsystems (ziwei, bazi, etc.)
+# The Zi Wei Dou Shu analyzer currently relies only on core dependencies
+# (aiohttp for the DeepSeek API call), which are listed in requirements.txt.
+# Install core dependencies first:
+#   pip install -r requirements.txt
