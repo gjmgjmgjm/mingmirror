@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import aiofiles
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from auth import CookieManager
@@ -406,6 +407,15 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 + "\n"
             )
         return {"status": "ok"}
+
+    # Serve the bundled frontend web UI under /app; redirect root to it.
+    frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
+    if frontend_dir.is_dir():
+        app.mount("/app", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/app/index.html")
 
     return app
 

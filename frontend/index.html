@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>命盘 · 多学派命理分析</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;500;700&family=Zhi+Mang+Xing&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink-900: #0f0e0c;
+      --ink-800: #1a1815;
+      --ink-700: #262320;
+      --paper: #f4f1ea;
+      --paper-dim: rgba(244, 241, 234, 0.08);
+      --vermilion: #c53d2f;
+      --vermilion-glow: rgba(197, 61, 47, 0.35);
+      --gold: #c9a227;
+      --gold-dim: rgba(201, 162, 39, 0.18);
+      --jade: #5a8f7b;
+      --text: #e8e3d8;
+      --text-dim: #9f9a8e;
+      --radius: 14px;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--ink-900);
+      color: var(--text);
+      font-family: "Noto Serif SC", serif;
+      overflow: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(197, 61, 47, 0.12), transparent 35%),
+        radial-gradient(circle at 85% 80%, rgba(201, 162, 39, 0.08), transparent 30%),
+        url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.055'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid rgba(244, 241, 234, 0.08);
+      backdrop-filter: blur(8px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: "Zhi Mang Xing", cursive;
+      font-size: 2.2rem;
+      font-weight: 400;
+      color: var(--paper);
+      letter-spacing: 2px;
+    }
+
+    .brand span {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--jade);
+      box-shadow: 0 0 10px var(--jade);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr 300px;
+      gap: 24px;
+      padding: 24px 32px 32px;
+      overflow: hidden;
+    }
+
+    .panel {
+      background: var(--ink-800);
+      border: 1px solid rgba(244, 241, 234, 0.08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(244, 241, 234, 0.06);
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--gold);
+      font-size: 0.95rem;
+    }
+
+    .panel-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: var(--ink-700);
+      border: 1px solid rgba(244, 241, 234, 0.1);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--vermilion);
+      box-shadow: 0 0 0 3px var(--vermilion-glow);
+    }
+
+    .field { margin-bottom: 18px; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    button.primary {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, var(--vermilion), #a32e22);
+      color: var(--paper);
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-weight: 700;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.2s;
+    }
+
+    button.primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px var(--vermilion-glow);
+    }
+
+    button.primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .chart-paper {
+      background: linear-gradient(180deg, rgba(244, 241, 234, 0.05), rgba(244, 241, 234, 0.02));
+      border: 1px solid rgba(244, 241, 234, 0.08);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .pillars {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .pillar {
+      background: var(--ink-700);
+      border: 1px solid rgba(244, 241, 234, 0.1);
+      border-radius: 12px;
+      padding: 18px 8px;
+      text-align: center;
+      transition: transform 0.2s;
+    }
+
+    .pillar:hover { transform: translateY(-4px); }
+
+    .pillar.day-master {
+      border-color: var(--gold);
+      background: var(--gold-dim);
+      box-shadow: 0 0 24px rgba(201, 162, 39, 0.15);
+    }
+
+    .pillar .label {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+    }
+
+    .pillar .stem {
+      font-size: 2rem;
+      color: var(--paper);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .pillar .branch {
+      font-size: 1.6rem;
+      color: var(--vermilion);
+      line-height: 1;
+    }
+
+    .result-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    .result-empty .seal {
+      width: 80px;
+      height: 80px;
+      border: 2px solid var(--vermilion);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Zhi Mang Xing", cursive;
+      font-size: 2.4rem;
+      color: var(--vermilion);
+      margin-bottom: 18px;
+      transform: rotate(-6deg);
+      opacity: 0.7;
+    }
+
+    .loading {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 40px;
+      color: var(--text-dim);
+    }
+
+    .loading.active { display: flex; }
+
+    .ink-ripple {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--vermilion) 0%, transparent 70%);
+      animation: ripple 1.4s ease-out infinite;
+    }
+
+    @keyframes ripple {
+      0% { transform: scale(0.4); opacity: 0.8; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    .result-content { display: none; }
+    .result-content.active { display: block; }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .meta-card {
+      background: var(--paper-dim);
+      border-radius: 10px;
+      padding: 14px;
+    }
+
+    .meta-card .key { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 6px; }
+    .meta-card .value { font-size: 1.1rem; color: var(--paper); font-weight: 700; }
+
+    .domain-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .domain-card {
+      background: var(--ink-700);
+      border-left: 3px solid var(--vermilion);
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .domain-card .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+      color: var(--paper);
+      margin-bottom: 10px;
+    }
+
+    .domain-card .badge {
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(201, 162, 39, 0.18);
+      color: var(--gold);
+    }
+
+    .domain-card p {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    .reasoning {
+      background: rgba(244, 241, 234, 0.04);
+      border-radius: 10px;
+      padding: 18px;
+      margin-bottom: 24px;
+      line-height: 1.8;
+      color: var(--text);
+    }
+
+    .feedback {
+      display: flex;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .feedback button {
+      flex: 1;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid rgba(244, 241, 234, 0.12);
+      border-radius: 8px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .feedback button:hover {
+      border-color: var(--vermilion);
+      color: var(--paper);
+    }
+
+    .case-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .case-item {
+      background: var(--paper-dim);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .case-item:hover { background: rgba(244, 241, 234, 0.12); }
+
+    .case-item .bazi { color: var(--gold); font-weight: 700; margin-bottom: 4px; }
+    .case-item .snippet { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .error {
+      background: rgba(197, 61, 47, 0.12);
+      border: 1px solid rgba(197, 61, 47, 0.3);
+      color: #eaa;
+      padding: 14px;
+      border-radius: 10px;
+      margin-bottom: 18px;
+    }
+
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; overflow-y: auto; }
+      .panel { min-height: 400px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">
+        <h1>命盘</h1>
+        <span>多学派命理分析工作台</span>
+      </div>
+      <div class="status">
+        <div class="status-dot"></div>
+        <span id="statusText">等待输入</span>
+      </div>
+    </header>
+    <main>
+      <section class="panel">
+        <div class="panel-header">输入命盘</div>
+        <div class="panel-body">
+          <div class="field">
+            <label for="bazi">四柱八字</label>
+            <input id="bazi" type="text" placeholder="甲子 丙寅 戊辰 庚午" value="乙卯 戊寅 庚子 丙子" />
+            <div class="hint">年 月 日 时，用空格分隔</div>
+          </div>
+          <div class="field">
+            <label for="question">所问之事</label>
+            <textarea id="question" rows="3" placeholder="例如：事业财运如何？"></textarea>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="gender">性别</label>
+              <select id="gender">
+                <option value="">未知</option>
+                <option value="male">男</option>
+                <option value="female">女</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="system">学派</label>
+              <select id="system">
+                <option value="bazi">八字</option>
+                <option value="ziwei">紫微斗数</option>
+                <option value="qizheng">七政四余</option>
+              </select>
+            </div>
+          </div>
+          <button class="primary" id="analyzeBtn">起盘分析</button>
+          <div class="feedback" id="feedback" style="display:none;">
+            <button data-correct="true">准</button>
+            <button data-correct="false">不准</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">分析结果</div>
+        <div class="panel-body" id="resultPanel">
+          <div class="result-empty">
+            <div class="seal">命</div>
+            <p>输入四柱八字后点击「起盘分析」</p>
+          </div>
+          <div class="loading" id="loading">
+            <div class="ink-ripple"></div>
+            <span>排盘推运中…</span>
+          </div>
+          <div class="result-content" id="resultContent"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">参考案例</div>
+        <div class="panel-body">
+          <div class="case-list" id="caseList">
+            <div class="hint">暂无案例数据</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const API_PREFIX = "/api/v1";
+    const el = (id) => document.getElementById(id);
+
+    const domainLabels = {
+      career: "事业",
+      wealth: "财运",
+      marriage: "婚姻",
+      health: "健康",
+      general: "综合"
+    };
+
+    const confidenceClass = (c) => {
+      if (c === "high") return { text: "高", color: "#5a8f7b" };
+      if (c === "low") return { text: "低", color: "#c53d2f" };
+      return { text: "中", color: "#c9a227" };
+    };
+
+    async function fetchCases() {
+      try {
+        const res = await fetch(`${API_PREFIX}/bazi/cases`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = el("caseList");
+        if (!data.cases || data.cases.length === 0) {
+          list.innerHTML = '<div class="hint">暂无案例数据</div>';
+          return;
+        }
+        list.innerHTML = data.cases.slice(0, 30).map(c => `
+          <div class="case-item" data-bazi="${c.bazi || ""}">
+            <div class="bazi">${c.bazi || "未命名"}</div>
+            <div class="snippet">${(c.analysis_corrected || "").slice(0, 40)}</div>
+          </div>
+        `).join("");
+        list.querySelectorAll(".case-item").forEach(item => {
+          item.addEventListener("click", () => {
+            el("bazi").value = item.dataset.bazi;
+          });
+        });
+      } catch (err) {
+        el("caseList").innerHTML = `<div class="hint">案例加载失败：${err.message}</div>`;
+      }
+    }
+
+    function renderPillars(bazi) {
+      const parts = (bazi || "").trim().split(/\s+/);
+      const labels = ["年柱", "月柱", "日柱", "时柱"];
+      if (parts.length !== 4) return "";
+      return `
+        <div class="pillars">
+          ${parts.map((p, i) => {
+            const stem = p[0] || "";
+            const branch = p[1] || "";
+            const cls = i === 2 ? "pillar day-master" : "pillar";
+            return `<div class="${cls}">
+              <div class="label">${labels[i]}</div>
+              <div class="stem">${stem}</div>
+              <div class="branch">${branch}</div>
+            </div>`;
+          }).join("")}
+        </div>
+      `;
+    }
+
+    function renderResult(payload, system) {
+      const info = payload.basic_info || {};
+      const domains = payload.domain_analysis || {};
+      const summary = payload.summary || [];
+      const confidence = confidenceClass(payload.confidence);
+      const html = `
+        <div class="chart-paper">
+          ${renderPillars(payload.bazi || info.bazi)}
+          <div class="meta-grid">
+            <div class="meta-card"><div class="key">日主</div><div class="value">${info.day_master || "—"}</div></div>
+            <div class="meta-card"><div class="key">月令</div><div class="value">${info.month_branch || "—"}</div></div>
+            <div class="meta-card"><div class="key">格局</div><div class="value">${info.pattern || "—"}</div></div>
+            <div class="meta-card"><div class="key">用神</div><div class="value">${(info.useful_gods || []).join("、") || "—"}</div></div>
+            <div class="meta-card"><div class="key">忌神</div><div class="value">${(info.taboo_gods || []).join("、") || "—"}</div></div>
+            <div class="meta-card"><div class="key">置信度</div><div class="value" style="color:${confidence.color}">${confidence.text}</div></div>
+          </div>
+        </div>
+
+        <div class="domain-grid">
+          ${Object.entries(domainLabels).map(([key, label]) => {
+            const text = typeof domains[key] === "object" ? (domains[key].text || "") : (domains[key] || "");
+            const score = typeof domains[key] === "object" ? domains[key].score : null;
+            if (!text) return "";
+            return `
+              <div class="domain-card">
+                <div class="title">
+                  ${label}
+                  ${score !== null ? `<span class="badge">${score}分</span>` : ""}
+                </div>
+                <p>${text}</p>
+              </div>
+            `;
+          }).join("")}
+        </div>
+
+        ${payload.reasoning ? `<div class="reasoning">${payload.reasoning.replace(/\n/g, "<br/>")}</div>` : ""}
+
+        ${summary.length ? `
+          <div class="domain-card" style="border-left-color: var(--gold);">
+            <div class="title">核心断语</div>
+            <p>${summary.join("；")}</p>
+          </div>
+        ` : ""}
+
+        ${(payload.caveats || []).length ? `
+          <div class="hint" style="margin-top:14px;">注意：${payload.caveats.join("；")}</div>
+        ` : ""}
+      `;
+      el("resultContent").innerHTML = html;
+    }
+
+    async function analyze() {
+      const bazi = el("bazi").value.trim();
+      const question = el("question").value.trim();
+      const system = el("system").value;
+      if (!bazi) {
+        alert("请输入四柱八字");
+        return;
+      }
+      el("loading").classList.add("active");
+      el("resultContent").classList.remove("active");
+      el("feedback").style.display = "none";
+      el("statusText").textContent = "分析中…";
+
+      try {
+        const endpoint = system === "bazi" ? `${API_PREFIX}/bazi/analyze` : `${API_PREFIX}/bazi/analyze`;
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bazi, question })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+        }
+        el("loading").classList.remove("active");
+        el("resultContent").classList.add("active");
+        renderResult(data.result || data, system);
+        el("feedback").style.display = "flex";
+        el("statusText").textContent = "分析完成";
+      } catch (err) {
+        el("loading").classList.remove("active");
+        el("resultContent").innerHTML = `<div class="error">分析失败：${err.message}</div>`;
+        el("resultContent").classList.add("active");
+        el("statusText").textContent = "分析失败";
+      }
+    }
+
+    async function sendFeedback(correct) {
+      const bazi = el("bazi").value.trim();
+      try {
+        await fetch(`${API_PREFIX}/bazi/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bazi, correct, note: correct ? "前端反馈：准" : "前端反馈：不准" })
+        });
+        el("statusText").textContent = "反馈已记录";
+      } catch (err) {
+        el("statusText").textContent = "反馈失败";
+      }
+    }
+
+    el("analyzeBtn").addEventListener("click", analyze);
+    el("feedback").querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => sendFeedback(btn.dataset.correct === "true"));
+    });
+
+    fetchCases();
+  </script>
+</body>
+</html>
