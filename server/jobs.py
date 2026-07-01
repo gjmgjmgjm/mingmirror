@@ -22,8 +22,9 @@ class JobStatus:
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
-    TERMINAL = frozenset({SUCCESS, FAILED})
+    TERMINAL = frozenset({SUCCESS, FAILED, CANCELLED})
 
 
 class DownloadJob:
@@ -141,6 +142,10 @@ class JobManager:
                 job.skipped = int(counts.get("skipped", 0))
                 # 只要跑完就是 success；具体成功/失败个数通过字段区分
                 job.status = JobStatus.SUCCESS if job.failed == 0 else JobStatus.FAILED
+            except asyncio.CancelledError:
+                job.status = JobStatus.CANCELLED
+                job.error = "cancelled by user"
+                raise
             except Exception as exc:
                 job.status = JobStatus.FAILED
                 job.error = f"{type(exc).__name__}: {exc}"
@@ -155,6 +160,24 @@ class JobManager:
     async def list_jobs(self) -> List[DownloadJob]:
         async with self._lock:
             return list(self._jobs.values())
+
+    async def cancel(self, job_id: str) -> Optional[DownloadJob]:
+        """Cancel a pending or running job.
+
+        Returns the job if found, None otherwise. Terminal jobs are not modified.
+        """
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status in JobStatus.TERMINAL:
+                return job
+            if job._task is not None and not job._task.done():
+                job._task.cancel()
+            # If the task has not entered _run yet, mark it cancelled immediately.
+            if job.status == JobStatus.PENDING:
+                job.status = JobStatus.CANCELLED
+                job.finished_at = _now_iso()
+                job.finished_monotonic = time.monotonic()
+            return job
 
     async def shutdown(self) -> None:
         """等待所有 pending/running 任务结束。"""

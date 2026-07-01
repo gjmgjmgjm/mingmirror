@@ -10,20 +10,22 @@ fastapi/uvicorn 是**可选**依赖。若未安装，导入本模块会 ImportEr
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from auth import CookieManager
 from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
 from core import DouyinAPIClient, DownloaderFactory, URLParser
-from server.jobs import JobManager
+from server.jobs import JobManager, JobStatus
 from storage import FileManager
 from utils.logger import setup_logger
 from utils.validators import is_short_url, normalize_short_url
@@ -92,6 +94,13 @@ class BaziFeedbackRequest(BaseModel):
     note: str = ""
 
 
+class ConfigOverrideRequest(BaseModel):
+    thread: Optional[int] = None
+    rate_limit: Optional[float] = None
+    retry_times: Optional[int] = None
+    proxy: Optional[str] = None
+
+
 class _ServerDeps:
     """跨请求复用的重量级依赖。
 
@@ -128,6 +137,41 @@ class _ServerDeps:
         self.rate_limiter = RateLimiter(max_per_second=float(config.get("rate_limit", 2) or 2))
         self.retry_handler = RetryHandler(max_retries=int(config.get("retry_times", 3) or 3))
         self.queue_manager = QueueManager(max_workers=int(config.get("thread", 5) or 5))
+        self._overrides: Dict[str, Any] = {}
+
+    def apply_overrides(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply runtime config overrides and return the effective values.
+
+        Only a small set of keys can be overridden at runtime because the
+        heavyweight control objects need to be rebuilt.
+        """
+        allowed = {"thread", "rate_limit", "retry_times", "proxy"}
+        changed = {k: v for k, v in overrides.items() if k in allowed and v is not None}
+        self._overrides.update(changed)
+
+        if "rate_limit" in changed:
+            self.rate_limiter = RateLimiter(
+                max_per_second=float(self._overrides.get("rate_limit", 2) or 2)
+            )
+        if "retry_times" in changed:
+            self.retry_handler = RetryHandler(
+                max_retries=int(self._overrides.get("retry_times", 3) or 3)
+            )
+        if "thread" in changed:
+            self.queue_manager = QueueManager(
+                max_workers=int(self._overrides.get("thread", 5) or 5)
+            )
+        # Proxy is stored on the config dict and used by api_client creation.
+        if "proxy" in changed:
+            self.config.config["proxy"] = changed["proxy"]
+
+        return self.get_effective_config()
+
+    def get_effective_config(self) -> Dict[str, Any]:
+        """Return config merged with runtime overrides."""
+        effective = dict(self.config.config)
+        effective.update(self._overrides)
+        return effective
 
 
 async def _execute_download(url: str, deps: "_ServerDeps") -> Dict[str, int]:
@@ -226,6 +270,52 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def list_jobs() -> Dict[str, List[Dict[str, Any]]]:
         jobs = await manager.list_jobs()
         return {"jobs": [j.to_dict() for j in jobs]}
+
+    @app.delete("/api/v1/jobs/{job_id}")
+    async def cancel_job(job_id: str) -> Dict[str, Any]:
+        """Cancel a pending or running job."""
+        job = await manager.cancel(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job.to_dict()
+
+    @app.get("/api/v1/jobs/{job_id}/events")
+    async def job_events(job_id: str, request: Request):
+        """SSE stream of job status changes."""
+
+        async def event_stream():
+            last_status = None
+            while True:
+                if await request.is_disconnected():
+                    break
+                job = await manager.get(job_id)
+                if job is None:
+                    yield f"event: error\ndata: {json.dumps({'detail': 'job not found'}, ensure_ascii=False)}\n\n"
+                    break
+                current = job.to_dict()
+                if current["status"] != last_status:
+                    last_status = current["status"]
+                    yield f"event: status\ndata: {json.dumps(current, ensure_ascii=False)}\n\n"
+                if current["status"] in JobStatus.TERMINAL:
+                    break
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+
+    @app.get("/api/v1/config")
+    async def get_config() -> Dict[str, Any]:
+        """Get the current effective configuration (including runtime overrides)."""
+        return deps.get_effective_config()
+
+    @app.post("/api/v1/config")
+    async def update_config(req: ConfigOverrideRequest) -> Dict[str, Any]:
+        """Apply runtime config overrides."""
+        overrides = req.model_dump(exclude_unset=True)
+        return deps.apply_overrides(overrides)
 
     # ── 八字相关端点 ──
 

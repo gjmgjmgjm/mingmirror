@@ -18,6 +18,7 @@ def client(tmp_path: Path):
     cases_path.write_text("", encoding="utf-8")
     knowledge_path = tmp_path / "rule_primer.md"
     knowledge_path.write_text("# 基础知识", encoding="utf-8")
+    feedback_path = tmp_path / "feedback.jsonl"
     config_path = tmp_path / "config.yml"
     config_path.write_text(
         f"path: ./Downloaded\n"
@@ -25,7 +26,8 @@ def client(tmp_path: Path):
         f"link: []\n"
         f"bazi_ai:\n"
         f"  cases: {cases_path}\n"
-        f"  knowledge_base: {knowledge_path}\n",
+        f"  knowledge_base: {knowledge_path}\n"
+        f"  feedback_path: {feedback_path}\n",
         encoding="utf-8",
     )
     config = ConfigLoader(str(config_path))
