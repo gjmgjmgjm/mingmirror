@@ -387,20 +387,38 @@ async def _run_bazi_subcommand(args, config: ConfigLoader) -> None:
             )
 
     if args.analyze_bazi:
-        from tools.bazi_ai.engine import analyze_bazi
-
         ai_cfg = config.get("bazi_ai") or {}
         bazi = args.analyze_bazi.strip()
         cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
         knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/knowledge_base.md"))
+        embedding_cache = ai_cfg.get("embedding_cache")
+        embedding_cache_path = Path(embedding_cache) if embedding_cache else None
+        ensemble_runs = int(ai_cfg.get("ensemble_runs", 1))
         display.print_info(f"正在分析八字：{bazi}")
-        result = await analyze_bazi(
-            bazi,
-            question=args.bazi_question,
-            cases_path=cases_path,
-            knowledge_base_path=knowledge_path,
-            top_k=3,
-        )
+
+        if ensemble_runs > 1:
+            from tools.bazi_ai.ensemble import analyze_bazi_ensemble
+
+            result = await analyze_bazi_ensemble(
+                bazi,
+                question=args.bazi_question,
+                runs=ensemble_runs,
+                cases_path=cases_path,
+                knowledge_base_path=knowledge_path,
+                embedding_cache_path=embedding_cache_path,
+                top_k=ai_cfg.get("top_k", 3),
+            )
+        else:
+            from tools.bazi_ai.engine import analyze_bazi
+
+            result = await analyze_bazi(
+                bazi,
+                question=args.bazi_question,
+                cases_path=cases_path,
+                knowledge_base_path=knowledge_path,
+                embedding_cache_path=embedding_cache_path,
+                top_k=ai_cfg.get("top_k", 3),
+            )
         if result.get("_mock"):
             display.print_warning("未配置 DEEPSEEK_API_KEY，仅返回相似案例检索结果")
         display.print_info(json.dumps(result, ensure_ascii=False, indent=2))

@@ -116,6 +116,13 @@ Downloaded/
 - ✅ 增加对应测试，确保发布时间命名与清单写入行为
 - ✅ 修复 proxy validator 符号同步（`_PROXY_ALLOWED_SCHEMES` / `_is_valid_proxy`）
 - ✅ 更新项目文档与测试统计
+- ✅ 新增 bazi 四柱校验器（六十甲子验证）
+- ✅ 案例库自动去重与非法八字过滤
+- ✅ 领域感知 RAG + 可选 embedding 语义召回
+- ✅ 案例自动标注器（格局、身强身弱、用神忌神）
+- ✅ 规则校验层（旺衰/用神忌神逻辑检查）
+- ✅ 多轮一致性聚合（ensemble）降低 LLM 方差
+- ✅ 新增 bazi REST API（analyze / cases / extract / feedback）
 
 
 ## 7. 测试与验证
@@ -129,10 +136,10 @@ PYTHONPATH=. pytest -q
 结果：
 
 ```text
-384 passed, 1 skipped
+471 passed, 0 failed, 0 error
 ```
 
-说明：当前有 `pytest-asyncio` 的 deprecation warning（事件循环 scope 配置），不影响功能正确性。
+说明：测试套件持续增长，当前已无跳过项；`pytest-asyncio` deprecation warning 已配置忽略。
 
 
 ## 8. 后续建议

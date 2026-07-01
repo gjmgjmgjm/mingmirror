@@ -26,6 +26,8 @@ from tools.bazi_ai.bazi_validator import (
     month_branch,
     normalize_bazi,
 )
+from tools.bazi_ai.embeddings import EmbeddingStore
+from tools.bazi_ai.rule_checker import check_analysis
 
 # Domain keywords used to boost retrieval when the user asks a domain question.
 _DOMAIN_KEYWORDS = {
@@ -117,10 +119,36 @@ def retrieve_similar_cases(
     question: str,
     cases_path: Path,
     top_k: int = 3,
+    embedding_cache_path: Optional[Path] = None,
 ) -> List[Dict]:
-    """Return the top-k most relevant cases."""
+    """Return the top-k most relevant cases.
+
+    If *embedding_cache_path* exists and sentence-transformers is installed,
+    semantic similarity is combined with the keyword heuristic for ranking.
+    """
     cases = _load_cases(cases_path)
-    scored = [(_case_relevance(c, bazi, question), c) for c in cases]
+    if not cases:
+        return []
+
+    embedding_bonus: Dict[int, float] = {}
+
+    if embedding_cache_path is not None and embedding_cache_path.exists():
+        store = EmbeddingStore()
+        if store.load_cache(embedding_cache_path):
+            query = f"{bazi}\n{question}".strip()
+            for rank, (case, score) in enumerate(store.search(query, top_k=min(len(cases), top_k * 3))):
+                for idx, c in enumerate(cases):
+                    if c is case:
+                        # Normalize score to a 0-30 bonus and decay by rank.
+                        embedding_bonus[idx] = max(0.0, score * 30 - rank * 3)
+                        break
+
+    scored = []
+    for idx, case in enumerate(cases):
+        keyword_score = _case_relevance(case, bazi, question)
+        bonus = embedding_bonus.get(idx, 0.0)
+        scored.append((keyword_score + bonus, case))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     return [c for _, c in scored[:top_k]]
 
@@ -230,6 +258,7 @@ async def analyze_bazi(
     question: str = "",
     cases_path: Optional[Path] = Path("./bazi_knowledge/cases.jsonl"),
     knowledge_base_path: Path = Path("./bazi_knowledge/knowledge_base.md"),
+    embedding_cache_path: Optional[Path] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -251,7 +280,13 @@ async def analyze_bazi(
     bazi = normalized
     top_k = max(0, min(top_k, 10))
     if cases_path is not None:
-        similar_cases = retrieve_similar_cases(bazi, question, cases_path, top_k=top_k)
+        similar_cases = retrieve_similar_cases(
+            bazi,
+            question,
+            cases_path,
+            top_k=top_k,
+            embedding_cache_path=embedding_cache_path,
+        )
     else:
         similar_cases = []
     rule_primer = _build_rule_primer(knowledge_base_path)
@@ -367,6 +402,8 @@ def _validate_output(result: Dict, bazi: str) -> Dict:
 
     if caveats and "caveats" in result:
         result["caveats"] = caveats
+
+    result, _ = check_analysis(result)
     return result
 
 

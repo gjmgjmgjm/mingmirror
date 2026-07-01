@@ -3,14 +3,17 @@
 HTTP 层薄封装：
 - 接收 URL，创建 job，返回 job_id
 - 实际下载委托给 cli.main.download_url 的简化复用
+- 新增八字分析相关端点（可选功能，需 DeepSeek API Key / rapidocr）
 
 fastapi/uvicorn 是**可选**依赖。若未安装，导入本模块会 ImportError。
 """
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException
@@ -55,6 +58,38 @@ class JobResponse(BaseModel):
     job_id: str
     status: str
     url: str
+
+
+class BaziAnalyzeRequest(BaseModel):
+    bazi: str
+    question: str = ""
+    top_k: int = 3
+
+
+class BaziAnalyzeResponse(BaseModel):
+    bazi: str
+    result: Dict[str, Any]
+
+
+class BaziExtractRequest(BaseModel):
+    user_dir: str
+    duration: int = 60
+    interval: float = 2.0
+
+
+class BaziExtractResponse(BaseModel):
+    user_dir: str
+    total: int
+    success: int
+    failed: int
+    skipped: int
+    manifest_path: str
+
+
+class BaziFeedbackRequest(BaseModel):
+    bazi: str
+    correct: bool
+    note: str = ""
 
 
 class _ServerDeps:
@@ -191,6 +226,95 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def list_jobs() -> Dict[str, List[Dict[str, Any]]]:
         jobs = await manager.list_jobs()
         return {"jobs": [j.to_dict() for j in jobs]}
+
+    # ── 八字相关端点 ──
+
+    @app.post("/api/v1/bazi/analyze", response_model=BaziAnalyzeResponse)
+    async def analyze_bazi_endpoint(req: BaziAnalyzeRequest) -> BaziAnalyzeResponse:
+        """Analyze a single bazi string with DeepSeek + RAG."""
+        from tools.bazi_ai.engine import analyze_bazi
+
+        ai_cfg = config.get("bazi_ai") or {}
+        cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
+        knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
+        embedding_cache = ai_cfg.get("embedding_cache")
+        embedding_cache_path = Path(embedding_cache) if embedding_cache else None
+
+        result = await analyze_bazi(
+            req.bazi.strip(),
+            question=req.question,
+            cases_path=cases_path,
+            knowledge_base_path=knowledge_path,
+            embedding_cache_path=embedding_cache_path,
+            top_k=min(max(req.top_k, 1), 10),
+        )
+        return BaziAnalyzeResponse(bazi=req.bazi, result=result)
+
+    @app.get("/api/v1/bazi/cases")
+    async def list_bazi_cases() -> Dict[str, List[Dict[str, Any]]]:
+        """List structured bazi cases used for RAG retrieval."""
+        ai_cfg = config.get("bazi_ai") or {}
+        cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
+        cases = []
+        if cases_path.exists():
+            with cases_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        cases.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        return {"cases": cases}
+
+    @app.post("/api/v1/bazi/extract", response_model=BaziExtractResponse)
+    async def extract_bazi_endpoint(req: BaziExtractRequest) -> BaziExtractResponse:
+        """Run OCR-based bazi extraction over downloaded videos in a user dir."""
+        from fastapi.concurrency import run_in_threadpool
+
+        from tools.bazi_cli import extract_bazi_for_directory
+
+        user_dir = Path(req.user_dir)
+        if not user_dir.exists():
+            raise HTTPException(status_code=404, detail=f"user_dir not found: {req.user_dir}")
+
+        summary = await run_in_threadpool(
+            extract_bazi_for_directory,
+            user_dir,
+            user_dir,  # base_dir for relative manifest keys
+            duration=req.duration,
+            interval=req.interval,
+            resume=True,
+        )
+        return BaziExtractResponse(
+            user_dir=str(user_dir),
+            total=summary["total"],
+            success=summary["success"],
+            failed=summary["failed"],
+            skipped=summary["skipped"],
+            manifest_path=str(summary["manifest_path"]),
+        )
+
+    @app.post("/api/v1/bazi/feedback")
+    async def bazi_feedback(req: BaziFeedbackRequest) -> Dict[str, str]:
+        """Record simple feedback for a bazi analysis (placeholder persistence)."""
+        ai_cfg = config.get("bazi_ai") or {}
+        feedback_path = Path(ai_cfg.get("feedback_path", "./bazi_knowledge/feedback.jsonl"))
+        feedback_path.parent.mkdir(parents=True, exist_ok=True)
+        with feedback_path.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "bazi": req.bazi,
+                        "correct": req.correct,
+                        "note": req.note,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        return {"status": "ok"}
 
     return app
 

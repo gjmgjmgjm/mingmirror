@@ -19,15 +19,18 @@ def main():
     parser = argparse.ArgumentParser(description="八字 AI leave-one-out benchmark")
     parser.add_argument("-c", "--cases", default="./bazi_knowledge/cases.jsonl")
     parser.add_argument("-k", "--knowledge", default="./bazi_knowledge/rule_primer.md")
+    parser.add_argument("-e", "--embeddings", default="./bazi_knowledge/cases.pkl")
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--raw", action="store_true", help="输出每条预测详情")
     parser.add_argument("-o", "--output", help="将完整报告写入 JSON 文件")
     args = parser.parse_args()
 
+    cache_path = Path(args.embeddings) if args.embeddings else None
     report = asyncio.run(
         evaluate_leave_one_out(
             cases_path=Path(args.cases),
             knowledge_base_path=Path(args.knowledge),
+            embedding_cache_path=cache_path,
             api_key=args.api_key,
         )
     )

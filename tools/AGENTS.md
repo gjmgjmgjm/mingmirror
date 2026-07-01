@@ -22,10 +22,15 @@ Standalone utility scripts — not part of the core download pipeline.
 | `bazi_corrector.py` | Corrects common OCR/transcription errors in bazi strings |
 | `bazi_ai/bazi_validator.py` | Validates and normalizes four-pillar bazi strings against the 60 JiaZi cycle |
 | `bazi_ai/case_builder.py` | Parses `_knowledge_final.md` into structured `cases.jsonl`; validates and deduplicates cases |
+| `bazi_ai/annotator.py` | Auto-labels cases with pattern, day-master strength, useful/taboo gods via LLM |
+| `bazi_ai/embeddings.py` | Optional sentence-transformer embedding cache for semantic RAG retrieval |
+| `bazi_ai/rule_checker.py` | Lightweight rule-based sanity checks for day-master strength and useful/taboo gods |
 | `bazi_ai/engine.py` | DeepSeek + RAG bazi analysis engine with domain-aware retrieval and output validation |
-| `bazi_ai/evaluator.py` | Consistency, format, and leave-one-out benchmark evaluator |
+| `bazi_ai/ensemble.py` | Multi-run consensus aggregation to reduce single-sample LLM variance |
+| `bazi_ai/evaluator.py` | Consistency, format, case overlap, and leave-one-out benchmark evaluator |
 | `bazi_ai/benchmark.py` | CLI wrapper for `evaluate_leave_one_out()` |
 | `bazi_ai/cli.py` | Standalone CLI for `python -m tools.bazi_ai.cli` |
+| `frontend-handoff.md` | Handoff doc for the independent modern frontend developer |
 
 ## For AI Agents
 

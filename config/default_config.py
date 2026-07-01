@@ -109,7 +109,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": False,
         "cases": "./bazi_knowledge/cases.jsonl",
         "knowledge_base": "./bazi_knowledge/rule_primer.md",
+        "embedding_cache": "./bazi_knowledge/cases.pkl",
         "top_k": 3,
         "model": "deepseek-chat",
+        "ensemble_runs": 1,  # 设置为 3+ 可开启多轮投票
+        "temperature": 0.2,
     },
 }

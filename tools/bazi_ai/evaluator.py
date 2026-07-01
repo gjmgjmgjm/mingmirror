@@ -13,7 +13,7 @@ Proxy metrics:
 import asyncio
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from tools.bazi_ai.bazi_validator import normalize_bazi
 from tools.bazi_ai.engine import analyze_bazi, retrieve_similar_cases
@@ -102,6 +102,7 @@ async def evaluate_consistency(
     runs: int = 3,
     cases_path: Path = Path("./bazi_knowledge/cases.jsonl"),
     knowledge_base_path: Path = Path("./bazi_knowledge/knowledge_base.md"),
+    embedding_cache_path: Optional[Path] = None,
     api_key: str = None,
     base_url: str = None,
     model: str = None,
@@ -114,6 +115,7 @@ async def evaluate_consistency(
             question=question,
             cases_path=cases_path,
             knowledge_base_path=knowledge_base_path,
+            embedding_cache_path=embedding_cache_path,
             api_key=api_key,
             base_url=base_url,
             model=model,
@@ -145,6 +147,7 @@ async def evaluate_consistency(
 async def evaluate_leave_one_out(
     cases_path: Path = Path("./bazi_knowledge/cases.jsonl"),
     knowledge_base_path: Path = Path("./bazi_knowledge/knowledge_base.md"),
+    embedding_cache_path: Optional[Path] = None,
     api_key: str = None,
     base_url: str = None,
     model: str = None,
@@ -187,6 +190,7 @@ async def evaluate_leave_one_out(
             question="",
             cases_path=None,
             knowledge_base_path=knowledge_base_path,
+            embedding_cache_path=embedding_cache_path,
             api_key=api_key,
             base_url=base_url,
             model=model,
