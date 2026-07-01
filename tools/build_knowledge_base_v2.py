@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
 build_knowledge_base_v2.py — 将视频转录内容整理成结构化知识库（改进版）
+
+用法：
+  python tools/build_knowledge_base_v2.py --users 杨炎:./Downloaded/杨炎/post
+  python tools/build_knowledge_base_v2.py --input-dir ./Downloaded/作者名/post
 """
 
+import argparse
 import json
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Tuple
 
 
 def load_glossary(glossary_path: Path) -> Dict[str, str]:
@@ -225,22 +230,87 @@ def build_knowledge_base_v2(user_dir: Path, output_path: Path, glossary: Dict[st
     print(f"包含 {len(all_entries)} 个分析案例")
 
 
+def _parse_users(user_args: List[str]) -> List[Tuple[str, Path]]:
+    """Parse --users strings in 'name:directory' format."""
+    users = []
+    for arg in user_args:
+        if ":" not in arg:
+            raise argparse.ArgumentTypeError(
+                f"--users must be in 'name:directory' format, got: {arg}"
+            )
+        name, directory = arg.split(":", 1)
+        users.append((name.strip(), Path(directory.strip())))
+    return users
+
+
 def main():
-    # 加载纠错词典
-    glossary_path = Path("D:/douyin-downloader-main/bazi_glossary.json")
+    parser = argparse.ArgumentParser(
+        description="将视频转录内容整理成结构化知识库（改进版）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例:\n"
+            "  python tools/build_knowledge_base_v2.py --users 杨炎:./Downloaded/杨炎/post\n"
+            "  python tools/build_knowledge_base_v2.py --input-dir ./Downloaded/作者名/post"
+        ),
+    )
+    parser.add_argument(
+        "--glossary",
+        default="./bazi_glossary.json",
+        help="纠错词典路径（默认 ./bazi_glossary.json）",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="./bazi_knowledge",
+        help="知识库输出目录（默认 ./bazi_knowledge）",
+    )
+    parser.add_argument(
+        "--users",
+        action="append",
+        metavar="NAME:DIR",
+        help="用户名称与目录（可多次传入，格式 name:directory）",
+    )
+    parser.add_argument(
+        "--input-dir",
+        help="单个用户目录（目录名作为用户名称）",
+    )
+    parser.add_argument(
+        "--base-dir",
+        default=".",
+        help="计算相对路径的基准目录（默认当前目录）",
+    )
+    args = parser.parse_args()
+
+    glossary_path = Path(args.glossary)
+    if not glossary_path.exists():
+        print(f"未找到纠错词典: {glossary_path}")
+        return
     glossary = load_glossary(glossary_path)
 
-    users = [
-        ("杨炎", Path("D:/douyin-downloader-main/Downloaded/杨炎/post")),
-    ]
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    output_dir = Path("D:/douyin-downloader-main/bazi_knowledge")
+    users: List[Tuple[str, Path]] = []
+    if args.users:
+        users.extend(_parse_users(args.users))
+    if args.input_dir:
+        input_path = Path(args.input_dir)
+        # 如果目录名为 post/like/mix/music，作者名取上一级目录
+        if input_path.name in ("post", "like", "mix", "music"):
+            user_name = input_path.parent.name or input_path.name
+        else:
+            user_name = input_path.name
+        users.append((user_name, input_path))
+
+    if not users:
+        parser.error("请至少指定 --users 或 --input-dir")
 
     for name, user_dir in users:
-        if user_dir.exists():
-            print(f"\n处理用户: {name}")
-            output_path = output_dir / f"{name}_knowledge_v2.md"
-            build_knowledge_base_v2(user_dir, output_path, glossary)
+        if not user_dir.exists():
+            print(f"跳过不存在的目录: {user_dir}")
+            continue
+        print(f"\n处理用户: {name}")
+        output_path = output_dir / f"{name}_knowledge_v2.md"
+        build_knowledge_base_v2(user_dir, output_path, glossary)
 
 
 if __name__ == "__main__":
