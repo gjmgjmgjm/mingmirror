@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-27 | Updated: 2026-06-30 -->
+<!-- Generated: 2026-03-27 | Updated: 2026-07-01 -->
 
 # tools
 
@@ -42,6 +42,7 @@ Standalone utility scripts — not part of the core download pipeline.
   - `opencv-python` for image handling
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
 - Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
+- Destiny analyzers (`tools/ziwei/`, `tools/qizheng/`, `tools/destiny/`) are optional and currently rely on core dependencies only; `requirements-destiny.txt` is a placeholder
 - `build_knowledge_base*.py` have been parameterized; use `--glossary`, `--users`, `--output-dir`, `--base-dir` instead of hard-coded paths
 - Hard-coded absolute paths in `batch_bazi_extract*.py` should be parameterized before reuse
 
@@ -51,6 +52,7 @@ Standalone utility scripts — not part of the core download pipeline.
 - Tests: `tests/test_bazi_tools.py` covers OCR parsing/assembly/correction helpers
 - Tests: `tests/test_bazi_cli.py` covers the reusable backend
 - Tests: `tests/test_bazi_validator.py`, `tests/test_bazi_ai.py`, `tests/test_bazi_ai_evaluator.py` cover validation, RAG, and evaluation
+- Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
 
 ### Common Patterns
 - Playwright async API for browser automation
