@@ -341,6 +341,10 @@ python run.py --serve --serve-port 8000
 | POST | `/api/v1/download` | 提交 `{"url": "..."}`，返回 `{job_id, status}` |
 | GET | `/api/v1/jobs/{job_id}` | 查询指定 job 的状态/计数 |
 | GET | `/api/v1/jobs` | 列出最近的 job（按 TTL + 容量剪裁） |
+| DELETE | `/api/v1/jobs/{job_id}` | 取消 pending 或 running 的 job |
+| GET | `/api/v1/jobs/{job_id}/events` | SSE 流式监听 job 状态变化 |
+| GET | `/api/v1/config` | 获取当前生效配置（含运行时覆盖） |
+| POST | `/api/v1/config` | 应用运行时配置覆盖（`thread`、`rate_limit`、`retry_times`、`proxy`） |
 | GET | `/api/v1/health` | 健康探针 |
 
 完成态的 job 会按 TTL（默认 24 小时）+ 最大数量（默认 500）自动剪裁；in-flight 的 job 永不被裁掉。

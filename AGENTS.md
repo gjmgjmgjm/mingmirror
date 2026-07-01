@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-27 | Updated: 2026-06-30 -->
+<!-- Generated: 2026-03-27 | Updated: 2026-07-01 -->
 
 # douyin-downloader
 
@@ -27,7 +27,7 @@ A Python-based Douyin (TikTok China) batch downloader that fetches videos, galle
 | `control/` | Concurrency control — rate limiter, retry handler, queue manager (see `control/AGENTS.md`) |
 | `core/` | Business logic — API client, URL parser, downloaders, strategy pattern (see `core/AGENTS.md`) |
 | `storage/` | SQLite database, file management, metadata handling (see `storage/AGENTS.md`) |
-| `tests/` | Pytest test suite with 52 test modules (see `tests/AGENTS.md`) |
+| `tests/` | Pytest test suite with 56 test modules (see `tests/AGENTS.md`) |
 | `tools/` | Standalone utilities: browser-based cookie fetching, bazi (八字) OCR/knowledge-base scripts and CLI backend (see `tools/AGENTS.md`) |
 | `utils/` | Shared helpers — logging, validation, anti-bot signatures (see `utils/AGENTS.md`) |
 
@@ -48,8 +48,9 @@ A Python-based Douyin (TikTok China) batch downloader that fetches videos, galle
 - **Intentional divergences** (these files differ by design):
   - `cli/main.py` — CLI omits desktop-only `_verify_self_checksum()` and `_enforce_license_at_startup()`.
   - `run.py` — CLI is a simple bootstrap; desktop has sidecar startup + data-dir migration.
-  - `server/app.py`, `server/jobs.py` — CLI server is a simplified subset; desktop adds license, SSE, overrides, cancel.
+  - `server/app.py`, `server/jobs.py` — CLI server now includes SSE, config overrides, and job cancellation; desktop adds license/DRM only.
   - `control/__init__.py` — CLI doesn't export `ProgressReporter` classes (desktop UI only).
+  - `core/user_modes/` — CLI has browser fallback for `post`/`like`/`mix`/`music`; desktop may reuse it or keep its own implementation.
 
 ### Testing Requirements
 - Run: `python -m pytest tests/`

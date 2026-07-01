@@ -354,6 +354,10 @@ Endpoints:
 | POST | `/api/v1/download` | Submit `{"url": "..."}`, returns `{job_id, status}` |
 | GET | `/api/v1/jobs/{job_id}` | Get a specific job's status/counts |
 | GET | `/api/v1/jobs` | List recent jobs (TTL + capacity capped) |
+| DELETE | `/api/v1/jobs/{job_id}` | Cancel a pending or running job |
+| GET | `/api/v1/jobs/{job_id}/events` | SSE stream of job status changes |
+| GET | `/api/v1/config` | Get current effective configuration |
+| POST | `/api/v1/config` | Apply runtime overrides (`thread`, `rate_limit`, `retry_times`, `proxy`) |
 | GET | `/api/v1/health` | Health probe |
 
 Finished jobs are pruned by TTL (default 24h) and max-jobs (default 500) — in-flight jobs are never pruned. Configure via `server.max_jobs` / `server.job_ttl_seconds`.

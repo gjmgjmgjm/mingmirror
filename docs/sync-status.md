@@ -42,7 +42,7 @@ N/A（本次无法执行有效对比）
 | `server/app.py` | CLI server 已实现 SSE、配置覆盖、job 取消；桌面版额外包含 license/DRM 相关逻辑 |
 | `server/jobs.py` | CLI 已实现 `CANCELLED` 状态与 `cancel()`；桌面版可能包含 UI 进度回调等差异 |
 | `control/__init__.py` | CLI 不导出 `ProgressReporter` 类（仅桌面 UI 使用） |
-| `core/user_modes/` | 由另一个窗口在改，本窗口不碰 |
+| `core/user_modes/` | CLI 已实现 `like/mix/music` 浏览器兜底；桌面版可复用或保留自身实现 |
 
 ## CI/CD 状态
 
@@ -51,12 +51,12 @@ N/A（本次无法执行有效对比）
   - 触发条件：`push` / `pull_request` 到 `main` / `master`
   - `paths-ignore`：文档-only 变更不触发 CI
   - `concurrency`：同一分支上的旧 run 自动取消
-  - Python 矩阵：`3.9`、`3.10`、`3.11`、`3.12`
+  - Jobs：`lint`、`test`（Python 3.9–3.12 矩阵）、`compat`（Ubuntu/Windows/macOS）、`optional-deps`（server + bazi）、`docker`
   - `pip` 缓存加速依赖安装
   - 安装：`pip install -r requirements.txt -r requirements-dev.txt`
   - 执行 `ruff check .`
   - 执行 `python -m pytest tests/ -q`
-  - 可选 Docker build 验证（依赖 test job 通过）
+  - Docker build 验证
 
 ## 建议同步项
 
@@ -73,9 +73,9 @@ N/A（本次无法执行有效对比）
 ## 本次本地验证结果
 
 - `ruff check .`：All checks passed!
-- `python -m pytest tests/ -q`：498 passed（含 `tests/test_ci_sanity.py` 4 项）
+- `python -m pytest tests/ -q`：**517 passed**（56 个测试模块）
 
 ## 备注
 
 - 当前未对共享模块做任何代码变更，因为无法确定桌面版状态。
-- 本文件由窗口 C（CI/CD + 桌面版同步检查）维护。
+- 本文件由窗口 D（文档与项目元数据同步）维护，基于窗口 C 的初稿更新。

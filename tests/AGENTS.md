@@ -4,7 +4,7 @@
 # tests
 
 ## Purpose
-Pytest test suite with 52 test modules covering all major components. Uses `pytest-asyncio` for async test support.
+Pytest test suite with 56 test modules covering all major components. Uses `pytest-asyncio` for async test support.
 
 ## Key Files
 
@@ -20,6 +20,10 @@ Pytest test suite with 52 test modules covering all major components. Uses `pyte
 | `test_bazi_rule_checker.py` | Bazi rule-based output validation |
 | `test_bazi_validator.py` | Bazi four-pillar validation |
 | `test_server_bazi.py` | Bazi REST API endpoints |
+| `test_server_enhance.py` | REST server enhancements: cancel, SSE, config overrides |
+| `test_ci_sanity.py` | Repository / CI consistency sanity checks |
+| `test_build_knowledge_base_v3.py` | Knowledge-base builder parameterization |
+| `test_user_modes_browser_fallback.py` | Browser fallback for like/mix/music user modes |
 | `test_config_loader.py` | Config loading, merging, env overrides, cookie resolution |
 | `test_config_validation.py` | Config validation edge cases |
 | `test_cookie_fetcher.py` | Browser-based cookie fetching tool |

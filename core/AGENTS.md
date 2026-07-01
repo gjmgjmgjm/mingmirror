@@ -20,6 +20,7 @@ Core business logic — Douyin API client, URL parsing, download orchestration, 
 | `mix_downloader.py` | Downloads Douyin "mix" (collection) content |
 | `music_downloader.py` | Downloads music-related content |
 | `user_mode_registry.py` | Auto-discovers and registers user mode strategies from `user_modes/` |
+| `user_modes/browser_fallback.py` | Playwright-based fallback collector for like/mix/music when API pagination stalls |
 | `transcript_manager.py` | Manages Whisper transcription for downloaded audio |
 
 ## Subdirectories
@@ -39,13 +40,14 @@ Core business logic — Douyin API client, URL parsing, download orchestration, 
 - Gallery downloads prefer no-watermark fields (`origin_image`/`display_image`/`url_list`) before watermark fallback fields (`download_url_list`/`owner_watermark_image`)
 
 ### Testing Requirements
-- Tests: `tests/test_api_client.py`, `tests/test_url_parser.py`, `tests/test_downloader_factory.py`, `tests/test_video_downloader.py`, `tests/test_user_downloader.py`, `tests/test_mix_downloader.py`, `tests/test_music_downloader.py`, `tests/test_user_mode_registry.py`, `tests/test_user_downloader_modes.py`
+- Tests: `tests/test_api_client.py`, `tests/test_url_parser.py`, `tests/test_downloader_factory.py`, `tests/test_video_downloader.py`, `tests/test_user_downloader.py`, `tests/test_mix_downloader.py`, `tests/test_music_downloader.py`, `tests/test_user_mode_registry.py`, `tests/test_user_downloader_modes.py`, `tests/test_user_modes_browser_fallback.py`
 
 ### Common Patterns
 - Factory pattern: `DownloaderFactory` → concrete downloader
 - Strategy pattern: `BaseUserModeStrategy` → concrete mode strategies
 - Registry pattern: `UserModeRegistry` auto-discovers strategies
 - Paged API collection with cursor-based pagination and stall detection
+- Browser fallback via `core/user_modes/browser_fallback.py` covers `like`/`mix`/`music` when API pagination stalls
 - `DownloadResult` tracks total/success/failed/skipped counts
 
 ## Dependencies

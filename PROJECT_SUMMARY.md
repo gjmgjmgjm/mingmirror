@@ -5,7 +5,7 @@
 - **项目名称**: Douyin Downloader (`dy-downloader`)
 - **版本**: `2.0.0`
 - **更新时间**: `2026-07-01`
-- **当前状态**: ✅ 核心功能可用，自动化测试通过
+- **当前状态**: ✅ 核心功能可用；`like/mix/music` 浏览器兜底、REST server 增强（取消/SSE/配置覆盖）、完整 CI/CD 均已落地；自动化测试 517 passed
 
 
 ## 2. 当前实现能力（按代码现状）
@@ -23,7 +23,9 @@
 - 时间过滤（`start_time` / `end_time`）
 - 数量限制（当前对 `number.post` 生效）
 - SQLite 去重与增量下载（当前对 `increase.post` 生效）
-- 翻页受限时的浏览器兜底（采集 `aweme_id` 并补全详情）
+- 翻页受限时的浏览器兜底（`post`/`like`/`mix`/`music` 模式均已接入 Playwright 兜底）
+- REST API server 模式（`--serve`）：job 提交/查询/列表/取消、SSE 状态流、运行时配置覆盖、健康探针
+- CI/CD：GitHub Actions 工作流覆盖 lint、Python 3.9–3.12 矩阵测试、跨平台兼容、可选依赖、Docker 构建验证
 
 ### 2.2 已新增（本次实现）
 
@@ -123,6 +125,9 @@ Downloaded/
 - ✅ 规则校验层（旺衰/用神忌神逻辑检查）
 - ✅ 多轮一致性聚合（ensemble）降低 LLM 方差
 - ✅ 新增 bazi REST API（analyze / cases / extract / feedback）
+- ✅ REST server 增强：job 取消、SSE 事件流、运行时配置覆盖
+- ✅ `like/mix/music` 用户模式增加浏览器兜底（`core/user_modes/browser_fallback.py`）
+- ✅ GitHub Actions CI：lint / test(3.9–3.12) / compat / optional-deps / docker
 
 
 ## 7. 测试与验证
@@ -136,7 +141,7 @@ PYTHONPATH=. pytest -q
 结果：
 
 ```text
-471 passed, 0 failed, 0 error
+517 passed, 0 failed, 0 error
 ```
 
 说明：测试套件持续增长，当前已无跳过项；`pytest-asyncio` deprecation warning 已配置忽略。
@@ -144,6 +149,6 @@ PYTHONPATH=. pytest -q
 
 ## 8. 后续建议
 
-1. 为 `like/mix/music` 增加浏览器兜底，降低 API 分页受限影响。
-2. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
-3. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
+1. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
+2. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
+3. 探索多命理学派（子平、盲派、紫微、七政四余）agent 融合架构。

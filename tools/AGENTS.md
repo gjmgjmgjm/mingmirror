@@ -41,7 +41,8 @@ Standalone utility scripts — not part of the core download pipeline.
   - `rapidocr-onnxruntime` for frame OCR
   - `opencv-python` for image handling
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
-- Bazi utilities are **experimental** and currently standalone; they are not invoked by `cli.main`
+- Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
+- `build_knowledge_base*.py` have been parameterized; use `--glossary`, `--users`, `--output-dir`, `--base-dir` instead of hard-coded paths
 - Hard-coded absolute paths in `batch_bazi_extract*.py` should be parameterized before reuse
 
 ### Testing Requirements
