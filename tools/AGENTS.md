@@ -20,8 +20,11 @@ Standalone utility scripts — not part of the core download pipeline.
 | `build_knowledge_base_v2.py` | Enhanced dialogue analyzer with glossary correction |
 | `build_knowledge_base_v3.py` | AI-assisted dialogue analysis for higher-quality knowledge bases |
 | `bazi_corrector.py` | Corrects common OCR/transcription errors in bazi strings |
-| `bazi_ai/case_builder.py` | Parses `_knowledge_final.md` into structured `cases.jsonl` |
-| `bazi_ai/engine.py` | DeepSeek + RAG bazi analysis engine |
+| `bazi_ai/bazi_validator.py` | Validates and normalizes four-pillar bazi strings against the 60 JiaZi cycle |
+| `bazi_ai/case_builder.py` | Parses `_knowledge_final.md` into structured `cases.jsonl`; validates and deduplicates cases |
+| `bazi_ai/engine.py` | DeepSeek + RAG bazi analysis engine with domain-aware retrieval and output validation |
+| `bazi_ai/evaluator.py` | Consistency, format, and leave-one-out benchmark evaluator |
+| `bazi_ai/benchmark.py` | CLI wrapper for `evaluate_leave_one_out()` |
 | `bazi_ai/cli.py` | Standalone CLI for `python -m tools.bazi_ai.cli` |
 
 ## For AI Agents
@@ -39,7 +42,9 @@ Standalone utility scripts — not part of the core download pipeline.
 ### Testing Requirements
 - Tests: `tests/test_cookie_fetcher.py`
 - Tests mock Playwright — do not launch real browsers
-- Tests: `tests/test_bazi_tools.py` covers OCR parsing/assembly/correction helpers; `tests/test_bazi_cli.py` covers the reusable backend
+- Tests: `tests/test_bazi_tools.py` covers OCR parsing/assembly/correction helpers
+- Tests: `tests/test_bazi_cli.py` covers the reusable backend
+- Tests: `tests/test_bazi_validator.py`, `tests/test_bazi_ai.py`, `tests/test_bazi_ai_evaluator.py` cover validation, RAG, and evaluation
 
 ### Common Patterns
 - Playwright async API for browser automation

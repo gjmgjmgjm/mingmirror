@@ -8,7 +8,6 @@ without hard-coded paths.
 """
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,16 +26,12 @@ from tools.build_knowledge_base_v3 import (
 )
 from tools.extract_bazi_and_tag_srt import extract_bazi, tag_srt
 
-#: Regex for a single bazi pillar (one stem + one branch).
-BAZI_PILLAR_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
-
 
 def validate_bazi_format(bazi: Optional[str]) -> bool:
-    """Return True if *bazi* is a non-empty string containing exactly 4 pillars."""
-    if not bazi or not isinstance(bazi, str):
-        return False
-    pillars = BAZI_PILLAR_RE.findall(bazi)
-    return len(pillars) == 4
+    """Return True if *bazi* is a valid four-pillar chart."""
+    from tools.bazi_ai.bazi_validator import validate_bazi as _validate_bazi
+
+    return _validate_bazi(bazi)
 
 
 def scan_video_dirs(user_dir: Path) -> List[Tuple[Path, Path]]:

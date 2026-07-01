@@ -17,6 +17,16 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from tools.bazi_ai.bazi_validator import (
+    day_master as validate_day_master,
+)
+from tools.bazi_ai.bazi_validator import (
+    month_branch as validate_month_branch,
+)
+from tools.bazi_ai.bazi_validator import (
+    normalize_bazi,
+)
+
 
 def load_glossary(glossary_path: Path) -> Dict[str, str]:
     if not glossary_path.exists():
@@ -48,17 +58,11 @@ def extract_bazi(text: str) -> Optional[str]:
 
 
 def extract_day_master(bazi: str) -> Optional[str]:
-    pillars = bazi.split()
-    if len(pillars) < 3:
-        return None
-    return pillars[2][0]
+    return validate_day_master(bazi)
 
 
 def extract_month_branch(bazi: str) -> Optional[str]:
-    pillars = bazi.split()
-    if len(pillars) < 2:
-        return None
-    return pillars[1][1]
+    return validate_month_branch(bazi)
 
 
 def parse_knowledge_md(md_path: Path, glossary: Dict[str, str]) -> List[Dict]:
@@ -74,7 +78,8 @@ def parse_knowledge_md(md_path: Path, glossary: Dict[str, str]) -> List[Dict]:
         # Only real cases have an advisor analysis section.
         if "### 命理师分析" not in block:
             continue
-        bazi = extract_bazi(block)
+        raw_bazi = extract_bazi(block)
+        bazi = normalize_bazi(raw_bazi)
         if not bazi:
             continue
 
@@ -167,25 +172,49 @@ def build_case_database(
     knowledge_dir: Path,
     output_path: Path,
     glossary_path: Optional[Path] = None,
+    dedup_key: str = "bazi",
 ) -> Dict[str, int]:
-    """Build and save the structured case database."""
+    """Build and save the structured case database.
+
+    Invalid bazi records are dropped, and duplicates are removed based on
+    *dedup_key* (default: ``bazi``). Set *dedup_key* to ``source_video`` to
+    keep multiple readings of the same chart, or ``bazi`` to collapse them.
+    """
     glossary = load_glossary(glossary_path or knowledge_dir.parent / "bazi_glossary.json")
     all_cases = []
     source_counts = {}
+    invalid_count = 0
 
     for md_path in sorted(knowledge_dir.glob("*_knowledge_final.md")):
         cases = parse_knowledge_md(md_path, glossary)
-        all_cases.extend(cases)
-        source_counts[md_path.name] = len(cases)
+        valid_cases = []
+        for case in cases:
+            if normalize_bazi(case.get("bazi", "")):
+                valid_cases.append(case)
+            else:
+                invalid_count += 1
+        all_cases.extend(valid_cases)
+        source_counts[md_path.name] = len(valid_cases)
+
+    # Deduplicate while preserving source order.
+    seen = set()
+    deduped = []
+    for case in all_cases:
+        key = case.get(dedup_key, case["bazi"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(case)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
-        for case in all_cases:
+        for case in deduped:
             f.write(json.dumps(case, ensure_ascii=False) + "\n")
 
     return {
-        "total_cases": len(all_cases),
-        "unique_bazi": len({c["bazi"] for c in all_cases}),
+        "total_cases": len(deduped),
+        "raw_cases": len(all_cases),
+        "invalid_cases": invalid_count,
+        "unique_bazi": len({c["bazi"] for c in deduped}),
         "sources": source_counts,
     }
 

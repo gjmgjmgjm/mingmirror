@@ -5,9 +5,21 @@ from tools.bazi_ai.evaluator import check_format, core_signature
 
 def test_check_format_complete():
     result = {
-        "basic_info": {},
+        "basic_info": {
+            "bazi": "甲子 丙寅 戊辰 庚午",
+            "day_master": "戊",
+            "month_branch": "寅",
+            "pattern": "伤官格",
+            "useful_gods": ["水"],
+            "taboo_gods": ["火"],
+        },
         "reasoning": "",
-        "domain_analysis": {},
+        "domain_analysis": {
+            "career": "",
+            "wealth": "",
+            "marriage": "",
+            "health": "",
+        },
         "summary": [],
         "confidence": "high",
         "caveats": [],
