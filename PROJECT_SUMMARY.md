@@ -4,7 +4,7 @@
 
 - **项目名称**: Douyin Downloader (`dy-downloader`)
 - **版本**: `2.0.0`
-- **更新时间**: `2026-02-18`
+- **更新时间**: `2026-07-01`
 - **当前状态**: ✅ 核心功能可用，自动化测试通过
 
 
@@ -108,12 +108,14 @@ Downloaded/
 8. 若开启数据库，写入 `aweme` 与 `download_history`
 
 
-## 6. 近期更新（2026-02-18）
+## 6. 近期更新（2026-07-01）
 
 - ✅ 文件名和目录日期从“下载时间”改为“作品发布时间（`create_time`）”
 - ✅ 新增独立下载清单 `download_manifest.jsonl`
 - ✅ 清单中补充 `date/file_names/tags` 等可追溯字段
 - ✅ 增加对应测试，确保发布时间命名与清单写入行为
+- ✅ 修复 proxy validator 符号同步（`_PROXY_ALLOWED_SCHEMES` / `_is_valid_proxy`）
+- ✅ 更新项目文档与测试统计
 
 
 ## 7. 测试与验证
@@ -127,7 +129,7 @@ PYTHONPATH=. pytest -q
 结果：
 
 ```text
-71 passed
+384 passed, 1 skipped
 ```
 
 说明：当前有 `pytest-asyncio` 的 deprecation warning（事件循环 scope 配置），不影响功能正确性。

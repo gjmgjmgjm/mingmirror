@@ -9,6 +9,7 @@ fastapi/uvicorn 是**可选**依赖。若未安装，导入本模块会 ImportEr
 
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List
 
@@ -23,6 +24,25 @@ from server.jobs import JobManager
 from storage import FileManager
 from utils.logger import setup_logger
 from utils.validators import is_short_url, normalize_short_url
+
+# Whitelisted proxy schemes for the REST proxy test endpoint.
+_PROXY_ALLOWED_SCHEMES = {"http", "https", "socks5", "socks5h"}
+_PROXY_RE = re.compile(r"^(https?|socks5h?)://(.+)$")
+
+
+def _is_valid_proxy(proxy: str) -> bool:
+    """Validate a proxy string for the test-proxy endpoint.
+
+    Empty string means "no proxy" and is accepted. Non-empty strings must use
+    a whitelisted scheme and provide a non-blank host portion.
+    """
+    if proxy == "":
+        return True
+    match = _PROXY_RE.match(proxy)
+    if not match:
+        return False
+    host = match.group(2).strip()
+    return host != ""
 
 logger = setup_logger("REST")
 

@@ -87,6 +87,12 @@ pip install playwright
 python -m playwright install chromium
 ```
 
+For the optional bazi (八字) OCR/analysis tools:
+
+```bash
+pip install -r requirements-bazi.txt
+```
+
 ### 3) Copy config file
 
 ```bash

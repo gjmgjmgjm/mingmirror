@@ -1,0 +1,6 @@
+# Optional dependencies for bazi (八字) OCR and analysis tools.
+# Install with:
+#   pip install -r requirements-bazi.txt
+
+rapidocr-onnxruntime
+opencv-python

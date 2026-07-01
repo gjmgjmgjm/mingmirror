@@ -1,16 +1,20 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-27 | Updated: 2026-03-27 -->
+<!-- Generated: 2026-03-27 | Updated: 2026-07-01 -->
 
 # tests
 
 ## Purpose
-Pytest test suite with 23 test modules covering all major components. Uses `pytest-asyncio` for async test support.
+Pytest test suite with 47 test modules covering all major components. Uses `pytest-asyncio` for async test support.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
 | `test_api_client.py` | API client request building and response parsing |
+| `test_bazi_ai.py` | Bazi AI analysis engine |
+| `test_bazi_ai_evaluator.py` | Bazi AI evaluator |
+| `test_bazi_cli.py` | Bazi CLI backend |
+| `test_bazi_tools.py` | Bazi OCR parsing/assembly/correction helpers |
 | `test_config_loader.py` | Config loading, merging, env overrides, cookie resolution |
 | `test_config_validation.py` | Config validation edge cases |
 | `test_cookie_fetcher.py` | Browser-based cookie fetching tool |

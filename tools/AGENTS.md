@@ -29,7 +29,9 @@ Standalone utility scripts — not part of the core download pipeline.
 ### Working In This Directory
 - `cookie_fetcher.py` requires the `[browser]` optional dependency (`playwright`)
 - Bazi scripts require additional packages **not** listed in `requirements.txt`:
+  - 八字相关工具需要额外安装 `pip install -r requirements-bazi.txt`
   - `rapidocr-onnxruntime` for frame OCR
+  - `opencv-python` for image handling
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
 - Bazi utilities are **experimental** and currently standalone; they are not invoked by `cli.main`
 - Hard-coded absolute paths in `batch_bazi_extract*.py` should be parameterized before reuse

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 batch_bazi_extract_new_user.py — 批量处理新用户视频的八字OCR提取
+
+用法：
+  python tools/batch_bazi_extract_new_user.py --input-dir ./Downloaded/作者名/post
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -12,10 +16,45 @@ from tools.extract_bazi_and_tag_srt import RapidOCR, extract_bazi, tag_srt
 
 
 def main():
-    user_dir = Path("D:/douyin-downloader-main/Downloaded/昭阳区丙炎文化传媒工作室（个体工商户）/post")
+    parser = argparse.ArgumentParser(
+        description="批量处理新用户视频的八字OCR提取",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="示例:\n  python tools/batch_bazi_extract_new_user.py --input-dir ./Downloaded/作者名/post",
+    )
+    parser.add_argument(
+        "--input-dir",
+        required=True,
+        help="用户 post 目录，例如 ./Downloaded/作者名/post",
+    )
+    parser.add_argument(
+        "--base-dir",
+        default=".",
+        help="计算相对路径的基准目录（默认当前目录）",
+    )
+    parser.add_argument(
+        "--manifest-name",
+        default="bazi_manifest.json",
+        help="清单文件名（默认 bazi_manifest.json）",
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=60,
+        help="只取前 N 秒（默认 60）",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="每隔多少秒取一帧（默认 2 秒）",
+    )
+    args = parser.parse_args()
+
+    user_dir = Path(args.input_dir)
+    base_dir = Path(args.base_dir)
+    manifest_path = user_dir / args.manifest_name
 
     # 加载已有的manifest
-    manifest_path = user_dir / "bazi_manifest.json"
     if manifest_path.exists():
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -33,7 +72,7 @@ def main():
             continue
         mp4 = mp4_files[0]
         # 检查是否已在manifest中且有值
-        rel_key = str(mp4.relative_to(Path("D:/douyin-downloader-main")))
+        rel_key = str(mp4.relative_to(base_dir))
         if rel_key in manifest and manifest[rel_key] is not None:
             continue
         unprocessed.append((d, mp4))
@@ -55,10 +94,10 @@ def main():
         print(f"\n[{i}/{len(unprocessed)}] 处理: {mp4.name}")
 
         try:
-            bazi = extract_bazi(mp4, ocr, duration=60, interval=2)
+            bazi = extract_bazi(mp4, ocr, duration=args.duration, interval=args.interval)
             if bazi:
                 print(f"  ✓ 八字: {bazi}")
-                manifest[str(mp4.relative_to(Path("D:/douyin-downloader-main")))] = bazi
+                manifest[str(mp4.relative_to(base_dir))] = bazi
                 success += 1
 
                 # 处理SRT
@@ -70,11 +109,11 @@ def main():
                     print(f"  ✓ 字幕已写入: {out.name}")
             else:
                 print("  ✗ 未能识别八字")
-                manifest[str(mp4.relative_to(Path("D:/douyin-downloader-main")))] = None
+                manifest[str(mp4.relative_to(base_dir))] = None
                 failed += 1
         except Exception as e:
             print(f"  ✗ 错误: {e}")
-            manifest[str(mp4.relative_to(Path("D:/douyin-downloader-main")))] = None
+            manifest[str(mp4.relative_to(base_dir))] = None
             failed += 1
 
         # 每10个视频保存一次manifest
