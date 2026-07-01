@@ -55,13 +55,13 @@ class ZiWeiAnalyzer:
         if validation_error:
             return self._error_result(chart_info, validation_error)
 
-        similar_cases = retrieve_cases(
+        similar_cases = await retrieve_cases(
             chart_info,
             question,
             cases_path=self.cases_path,
             top_k=self.top_k,
         )
-        system_prompt = build_system_prompt(self.rule_primer_path)
+        system_prompt = await build_system_prompt(self.rule_primer_path)
         user_prompt = build_user_prompt(chart_info, question, similar_cases)
 
         key = self.api_key or os.environ.get("DEEPSEEK_API_KEY")

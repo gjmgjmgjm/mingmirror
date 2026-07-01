@@ -98,10 +98,12 @@ class DouyinAPIClient:
         if self._ms_token:
             return self._ms_token
 
-        token = await asyncio.to_thread(
-            self._ms_token_manager.ensure_ms_token,
-            self.cookies,
-        )
+        # Prefer the async-native implementation to avoid blocking the event loop.
+        manager = self._ms_token_manager
+        if hasattr(manager, "aensure_ms_token"):
+            token = await manager.aensure_ms_token(self.cookies)
+        else:  # pragma: no cover - backward compatibility
+            token = await asyncio.to_thread(manager.ensure_ms_token, self.cookies)
         self._ms_token = token.strip()
         if self._ms_token:
             self.cookies["msToken"] = self._ms_token

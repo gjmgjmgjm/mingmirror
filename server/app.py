@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import aiofiles
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -347,8 +348,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
         cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
         cases = []
         if cases_path.exists():
-            with cases_path.open("r", encoding="utf-8") as f:
-                for line in f:
+            async with aiofiles.open(cases_path, "r", encoding="utf-8") as f:
+                async for line in f:
                     line = line.strip()
                     if not line:
                         continue
@@ -392,8 +393,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
         ai_cfg = config.get("bazi_ai") or {}
         feedback_path = Path(ai_cfg.get("feedback_path", "./bazi_knowledge/feedback.jsonl"))
         feedback_path.parent.mkdir(parents=True, exist_ok=True)
-        with feedback_path.open("a", encoding="utf-8") as f:
-            f.write(
+        async with aiofiles.open(feedback_path, "a", encoding="utf-8") as f:
+            await f.write(
                 json.dumps(
                     {
                         "bazi": req.bazi,

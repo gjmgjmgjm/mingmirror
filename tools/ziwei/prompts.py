@@ -6,14 +6,16 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import aiofiles
 
-def _load_cases(cases_path: Path) -> List[Dict[str, Any]]:
+
+async def _load_cases(cases_path: Path) -> List[Dict[str, Any]]:
     """Load example cases from a JSONL file."""
     if not cases_path.exists():
         return []
     cases: List[Dict[str, Any]] = []
-    with cases_path.open("r", encoding="utf-8") as f:
-        for line in f:
+    async with aiofiles.open(cases_path, "r", encoding="utf-8") as f:
+        async for line in f:
             line = line.strip()
             if not line:
                 continue
@@ -42,14 +44,14 @@ def _detect_question_domains(question: str) -> List[str]:
     return domains
 
 
-def _retrieve_similar_cases(
+async def _retrieve_similar_cases(
     chart_info: Dict[str, Any],
     question: str,
     cases_path: Path,
     top_k: int = 3,
 ) -> List[Dict[str, Any]]:
     """Return the most relevant example cases using simple keyword heuristics."""
-    cases = _load_cases(cases_path)
+    cases = await _load_cases(cases_path)
     if not cases:
         return []
 
@@ -78,17 +80,18 @@ def _retrieve_similar_cases(
     return cases[:top_k]
 
 
-def _load_rule_primer(rule_primer_path: Path, max_chars: int = 8000) -> str:
+async def _load_rule_primer(rule_primer_path: Path, max_chars: int = 8000) -> str:
     """Load a compact rule primer from markdown."""
     if not rule_primer_path.exists():
         return ""
-    text = rule_primer_path.read_text(encoding="utf-8")
+    async with aiofiles.open(rule_primer_path, "r", encoding="utf-8") as f:
+        text = await f.read()
     return text[:max_chars]
 
 
-def build_system_prompt(rule_primer_path: Optional[Path] = None) -> str:
+async def build_system_prompt(rule_primer_path: Optional[Path] = None) -> str:
     """Build the system prompt for the Zi Wei Dou Shu analyzer."""
-    primer = _load_rule_primer(rule_primer_path) if rule_primer_path else ""
+    primer = await _load_rule_primer(rule_primer_path) if rule_primer_path else ""
     return f"""你是一位精通紫微斗数的命理师，风格务实、断语明确。
 
 分析原则：

@@ -3,17 +3,20 @@
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import aiofiles
 
-def _load_rule_primer(rule_primer_path: Optional[Path], max_chars: int = 8000) -> str:
+
+async def _load_rule_primer(rule_primer_path: Optional[Path], max_chars: int = 8000) -> str:
     if rule_primer_path is None or not rule_primer_path.exists():
         return ""
-    text = rule_primer_path.read_text(encoding="utf-8")
+    async with aiofiles.open(rule_primer_path, "r", encoding="utf-8") as handle:
+        text = await handle.read()
     return text[:max_chars]
 
 
-def build_system_prompt(rule_primer_path: Optional[Path]) -> str:
+async def build_system_prompt(rule_primer_path: Optional[Path]) -> str:
     """Return the system prompt for the Qi Zheng Si Yu analysis model."""
-    primer = _load_rule_primer(rule_primer_path)
+    primer = await _load_rule_primer(rule_primer_path)
     primer_section = f"\n基础知识参考：\n{primer}" if primer else ""
 
     return f"""你是一位精通七政四余（Qi Zheng Si Yu）的命理师。七政四余以日、月、金、木、水、火、土七政为主，结合紫气、月孛、罗睺、计都四余，推断人的命运格局。

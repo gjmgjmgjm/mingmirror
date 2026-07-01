@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import aiofiles
+
 from tools.bazi_ai.bazi_validator import normalize_bazi
 from tools.bazi_ai.engine import analyze_bazi, retrieve_similar_cases
 
@@ -128,7 +130,7 @@ async def evaluate_consistency(
     format_issues = [check_format(r) for r in results]
     overlaps = []
     for r in results:
-        similar = retrieve_similar_cases(bazi, question, cases_path, top_k=3)
+        similar = await retrieve_similar_cases(bazi, question, cases_path, top_k=3)
         overlaps.append(case_overlap(r, similar))
 
     return {
@@ -159,8 +161,8 @@ async def evaluate_leave_one_out(
     """
     all_cases = []
     if cases_path.exists():
-        with cases_path.open("r", encoding="utf-8") as f:
-            for line in f:
+        async with aiofiles.open(cases_path, "r", encoding="utf-8") as f:
+            async for line in f:
                 line = line.strip()
                 if line:
                     try:

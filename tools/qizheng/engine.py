@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import aiofiles
+
 from tools.qizheng.prompts import build_system_prompt, build_user_prompt
 from utils.logger import setup_logger
 
@@ -45,13 +47,13 @@ def _normalize_chart(chart: str) -> Optional[str]:
     return None
 
 
-def _load_cases(cases_path: Optional[Path]) -> List[Dict[str, Any]]:
+async def _load_cases(cases_path: Optional[Path]) -> List[Dict[str, Any]]:
     if cases_path is None or not cases_path.exists():
         return []
     cases: List[Dict[str, Any]] = []
     try:
-        with cases_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+        async with aiofiles.open(cases_path, "r", encoding="utf-8") as handle:
+            async for line in handle:
                 line = line.strip()
                 if not line:
                     continue
@@ -83,13 +85,13 @@ def _score_case_relevance(case: Dict[str, Any], chart: str, question: str) -> in
     return score
 
 
-def _retrieve_similar_cases(
+async def _retrieve_similar_cases(
     chart: str,
     question: str,
     cases_path: Optional[Path],
     top_k: int,
 ) -> List[Dict[str, Any]]:
-    cases = _load_cases(cases_path)
+    cases = await _load_cases(cases_path)
     if not cases:
         return []
     scored = [(_score_case_relevance(c, chart, question), c) for c in cases]
@@ -238,10 +240,10 @@ class QiZhengAnalyzer:
             }
 
         chart = normalized
-        similar_cases = _retrieve_similar_cases(
+        similar_cases = await _retrieve_similar_cases(
             chart, question, self.cases_path, self.top_k
         )
-        system_prompt = build_system_prompt(self.rule_primer_path)
+        system_prompt = await build_system_prompt(self.rule_primer_path)
         user_prompt = build_user_prompt(chart, question, similar_cases)
 
         key = self.api_key or os.environ.get("DEEPSEEK_API_KEY")

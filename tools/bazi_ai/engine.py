@@ -20,6 +20,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import aiofiles
+
 from tools.bazi_ai.bazi_validator import (
     day_master,
     extract_pillars,
@@ -39,12 +41,12 @@ _DOMAIN_KEYWORDS = {
 }
 
 
-def _load_cases(cases_path: Path) -> List[Dict]:
+async def _load_cases(cases_path: Path) -> List[Dict]:
     if not cases_path.exists():
         return []
     cases = []
-    with cases_path.open("r", encoding="utf-8") as f:
-        for line in f:
+    async with aiofiles.open(cases_path, "r", encoding="utf-8") as f:
+        async for line in f:
             line = line.strip()
             if not line:
                 continue
@@ -114,7 +116,7 @@ def _case_relevance(case: Dict, bazi: str, question: str) -> int:
     return score
 
 
-def retrieve_similar_cases(
+async def retrieve_similar_cases(
     bazi: str,
     question: str,
     cases_path: Path,
@@ -126,7 +128,7 @@ def retrieve_similar_cases(
     If *embedding_cache_path* exists and sentence-transformers is installed,
     semantic similarity is combined with the keyword heuristic for ranking.
     """
-    cases = _load_cases(cases_path)
+    cases = await _load_cases(cases_path)
     if not cases:
         return []
 
@@ -153,11 +155,12 @@ def retrieve_similar_cases(
     return [c for _, c in scored[:top_k]]
 
 
-def _build_rule_primer(knowledge_base_path: Path, max_chars: int = 10000) -> str:
+async def _build_rule_primer(knowledge_base_path: Path, max_chars: int = 10000) -> str:
     """Load a short rule primer from the PDF knowledge base."""
     if not knowledge_base_path.exists():
         return ""
-    text = knowledge_base_path.read_text(encoding="utf-8")
+    async with aiofiles.open(knowledge_base_path, "r", encoding="utf-8") as f:
+        text = await f.read()
     # Truncate to avoid blowing up the prompt.
     return text[:max_chars]
 
@@ -280,7 +283,7 @@ async def analyze_bazi(
     bazi = normalized
     top_k = max(0, min(top_k, 10))
     if cases_path is not None:
-        similar_cases = retrieve_similar_cases(
+        similar_cases = await retrieve_similar_cases(
             bazi,
             question,
             cases_path,
@@ -289,7 +292,7 @@ async def analyze_bazi(
         )
     else:
         similar_cases = []
-    rule_primer = _build_rule_primer(knowledge_base_path)
+    rule_primer = await _build_rule_primer(knowledge_base_path)
     system_prompt = _build_system_prompt(rule_primer)
     user_prompt = _build_user_prompt(bazi, question, similar_cases)
 

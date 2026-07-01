@@ -56,7 +56,8 @@ class TestBuildCaseDatabase:
 
 
 class TestRetrieveSimilarCases:
-    def test_retrieve(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_retrieve(self, tmp_path: Path):
         cases_path = tmp_path / "cases.jsonl"
         cases_path.write_text(
             json.dumps({
@@ -74,10 +75,11 @@ class TestRetrieveSimilarCases:
             }, ensure_ascii=False)
             + "\n"
         )
-        results = retrieve_similar_cases("乙卯 戊寅 庚子 丙子", "问事业", cases_path, top_k=1)
+        results = await retrieve_similar_cases("乙卯 戊寅 庚子 丙子", "问事业", cases_path, top_k=1)
         assert len(results) == 1
         assert results[0]["bazi"] == "乙卯 戊寅 庚子 丙子"
 
-    def test_retrieve_empty(self, tmp_path: Path):
-        results = retrieve_similar_cases("甲子 丙寅 戊辰 庚午", "", tmp_path / "missing.jsonl", top_k=3)
+    @pytest.mark.asyncio
+    async def test_retrieve_empty(self, tmp_path: Path):
+        results = await retrieve_similar_cases("甲子 丙寅 戊辰 庚午", "", tmp_path / "missing.jsonl", top_k=3)
         assert results == []

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -350,31 +351,32 @@ class TranscriptManager:
         if language_hint:
             form.add_field("language", language_hint)
 
-        with file_path.open("rb") as f:
-            form.add_field(
-                "file",
-                f,
-                filename=filename,
-                content_type=content_type,
-            )
-            timeout = aiohttp.ClientTimeout(total=600)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    api_url,
-                    data=form,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                ) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        # Some misbehaving proxies echo the bearer token
-                        # into 4xx error pages; redact before the body
-                        # ends up in ``transcript_jobs.error_message``
-                        # (Property 1 / 2).
-                        if api_key and api_key in body:
-                            body = body.replace(api_key, _mask_api_key_local(api_key))
-                        raise RuntimeError(
-                            f"OpenAI transcription failed: status={response.status}, body={body}"
-                        )
+        async with aiofiles.open(file_path, "rb") as f:
+            file_data = await f.read()
+        form.add_field(
+            "file",
+            io.BytesIO(file_data),
+            filename=filename,
+            content_type=content_type,
+        )
+        timeout = aiohttp.ClientTimeout(total=600)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                api_url,
+                data=form,
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    # Some misbehaving proxies echo the bearer token
+                    # into 4xx error pages; redact before the body
+                    # ends up in ``transcript_jobs.error_message``
+                    # (Property 1 / 2).
+                    if api_key and api_key in body:
+                        body = body.replace(api_key, _mask_api_key_local(api_key))
+                    raise RuntimeError(
+                        f"OpenAI transcription failed: status={response.status}, body={body}"
+                    )
 
                     payload = await response.json(content_type=None)
                     if not isinstance(payload, dict):
