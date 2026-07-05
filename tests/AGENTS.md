@@ -4,7 +4,7 @@
 # tests
 
 ## Purpose
-Pytest test suite with 70 test modules covering all major components. Uses `pytest-asyncio` for async test support.
+Pytest test suite with 72 test modules covering all major components. Uses `pytest-asyncio` for async test support.
 
 ## Key Files
 
@@ -35,6 +35,8 @@ Pytest test suite with 70 test modules covering all major components. Uses `pyte
 | `test_destiny_benchmark.py` | Single-system vs ensemble benchmark |
 | `test_destiny_calibrator.py` | Event calibration engine |
 | `test_server_calibration.py` | Event calibration REST endpoints |
+| `test_destiny_script_writer.py` | Destiny Script generation |
+| `test_server_destiny_script.py` | Destiny Script REST endpoint |
 | `test_config_loader.py` | Config loading, merging, env overrides, cookie resolution |
 | `test_config_validation.py` | Config validation edge cases |
 | `test_cookie_fetcher.py` | Browser-based cookie fetching tool |

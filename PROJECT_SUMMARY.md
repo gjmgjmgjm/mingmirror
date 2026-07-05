@@ -144,6 +144,8 @@ Downloaded/
 - ✅ 整理工作区：修复 lint、分批提交、同步文档
 - ✅ 新增事件校准引擎（`tools/destiny/calibrator.py`）与 REST API（`/api/v1/charts/{chart_id}/events` / `calibrate`）
 - ✅ 事件校准支持录入重大事件、按领域匹配各命理系统预测、输出系统权重与时辰偏移建议
+- ✅ 实现 PRD 模块 6「命运剧本」：`tools/destiny/script_writer.py` + `POST /api/v1/destiny/script`
+- ✅ 命运剧本输出 RPG 角色卡（天赋/弱点/当前章节/下一章预告）+ 按大运分章的人生剧本
 
 
 ## 7. 测试与验证
@@ -157,7 +159,7 @@ PYTHONPATH=. pytest -q
 结果：
 
 ```text
-635 passed, 0 failed, 0 error
+642 passed, 0 failed, 0 error
 ```
 
 说明：测试套件持续增长，当前已无跳过项；`pytest-asyncio` deprecation warning 已配置忽略。
@@ -165,7 +167,7 @@ PYTHONPATH=. pytest -q
 
 ## 8. 后续建议
 
-1. 实现 PRD 模块 6「命运剧本」：RPG 角色卡 + 大运章节叙事。
+1. 新增前端 `/script` 页面展示命运剧本。
 2. 将事件校准结果持久化到 SQLite/PostgreSQL（当前为内存存储）。
 3. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
 4. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
