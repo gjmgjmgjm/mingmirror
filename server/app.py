@@ -196,6 +196,30 @@ class DestinyDailyRequest(BaseModel):
     date: Optional[str] = None  # ISO format; defaults to today
 
 
+class EventCreateRequest(BaseModel):
+    event_type: str
+    happened_at: str  # ISO date or datetime
+    description: str = ""
+
+
+class EventResponse(BaseModel):
+    id: str
+    chart_id: str
+    event_type: str
+    happened_at: str
+    description: str = ""
+
+
+class CalibrationResponse(BaseModel):
+    chart_id: str
+    event_count: int
+    average_score: float
+    system_scores: Dict[str, float]
+    adjusted_weights: Dict[str, float]
+    suggested_hour_offset: Optional[int] = None
+    events: List[Dict[str, Any]]
+
+
 class ConfigOverrideRequest(BaseModel):
     thread: Optional[int] = None
     rate_limit: Optional[float] = None
@@ -742,6 +766,56 @@ def build_app(config: ConfigLoader) -> FastAPI:
             location=req.location,
         )
 
+    def _build_calibration_analyzer() -> Any:
+        """Build an analyzer callable for the event calibrator."""
+        try:
+            from tools.destiny.contract import ChartInfo
+            from tools.destiny.ensemble import MultiDestinyAnalyzer
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"destiny subsystem not available: {exc}",
+            ) from exc
+
+        callables: Dict[str, Any] = {}
+        bazi_caller = _build_bazi_caller()
+        if bazi_caller is not None:
+            callables["bazi"] = bazi_caller
+        qizheng_caller = _build_qizheng_caller()
+        if qizheng_caller is not None:
+            callables["qizheng"] = qizheng_caller
+
+        async def _analyzer(chart_info: Any, question: str) -> Dict[str, Any]:
+            analyzer = MultiDestinyAnalyzer(
+                systems=["bazi", "qizheng"],
+                callables=callables,
+                config=config.get("bazi_ai") or {},
+                strategy="single",
+            )
+            if isinstance(chart_info, dict):
+                chart_info = ChartInfo(**chart_info)
+            return await analyzer.analyze(chart_info, question=question)
+
+        return _analyzer
+
+    # Event calibration storage (in-memory, per-process).
+    try:
+        from tools.destiny.calibrator import DestinyCalibrator, InMemoryEventStore
+
+        _event_store = InMemoryEventStore()
+        _calibrator = DestinyCalibrator(
+            analyzer=_build_calibration_analyzer(),
+            event_store=_event_store,
+        )
+        app.state.calibrator = _calibrator
+        app.state.event_store = _event_store
+    except Exception as exc:  # pragma: no cover - optional subsystem
+        _event_store = None
+        _calibrator = None
+        app.state.calibrator = None
+        app.state.event_store = None
+        logger.debug("Event calibration not available: %s", exc)
+
     @app.post("/api/v1/destiny/analyze", response_model=DestinyAnalyzeResponse)
     async def destiny_analyze(req: DestinyAnalyzeRequest) -> DestinyAnalyzeResponse:
         """Analyze a chart using one or more destiny systems."""
@@ -813,6 +887,75 @@ def build_app(config: ConfigLoader) -> FastAPI:
             "available": available,
             "all": ["bazi", "ziwei", "qizheng"],
         }
+
+    @app.post("/api/v1/charts/{chart_id}/events", response_model=EventResponse)
+    async def create_event(chart_id: str, req: EventCreateRequest) -> EventResponse:
+        """Record a life event for a given chart."""
+        if _calibrator is None or _event_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="event calibration subsystem not available",
+            )
+        try:
+            from tools.destiny.calibrator import LifeEvent
+
+            event = LifeEvent.create(
+                chart_id=chart_id.strip(),
+                event_type=req.event_type,
+                happened_at=req.happened_at,
+                description=req.description,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _event_store.add(event)
+        return EventResponse(
+            id=event.id,
+            chart_id=event.chart_id,
+            event_type=event.event_type,
+            happened_at=event.happened_at,
+            description=event.description,
+        )
+
+    @app.get("/api/v1/charts/{chart_id}/events", response_model=List[EventResponse])
+    async def list_events(chart_id: str) -> List[EventResponse]:
+        """List recorded life events for a given chart."""
+        if _calibrator is None or _event_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="event calibration subsystem not available",
+            )
+        return [
+            EventResponse(
+                id=e.id,
+                chart_id=e.chart_id,
+                event_type=e.event_type,
+                happened_at=e.happened_at,
+                description=e.description,
+            )
+            for e in _event_store.list(chart_id.strip())
+        ]
+
+    @app.post("/api/v1/charts/{chart_id}/calibrate", response_model=CalibrationResponse)
+    async def calibrate_chart(chart_id: str) -> CalibrationResponse:
+        """Calibrate destiny system weights against recorded events."""
+        if _calibrator is None or _event_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="event calibration subsystem not available",
+            )
+        from tools.destiny.contract import ChartInfo
+
+        chart = ChartInfo(bazi=chart_id.strip())
+        result = await _calibrator.calibrate(chart)
+        return CalibrationResponse(
+            chart_id=result["chart_id"],
+            event_count=result["event_count"],
+            average_score=result["average_score"],
+            system_scores=result["system_scores"],
+            adjusted_weights=result["adjusted_weights"],
+            suggested_hour_offset=result.get("suggested_hour_offset"),
+            events=result.get("events", []),
+        )
 
     # Serve the bundled frontend web UI under /app; redirect root to it.
     # Prefer the modern React build in web/dist; fall back to the legacy
