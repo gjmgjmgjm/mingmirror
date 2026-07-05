@@ -8,6 +8,7 @@ packages.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -20,9 +21,25 @@ class ChartInfo:
     question: str = ""
     gender: Optional[str] = None
     birth_datetime: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    def ziwei_chart_info(self) -> Dict[str, Any]:
+        """Build the chart_info dict expected by ZiWeiAnalyzer."""
+        location = self.location or {
+            "longitude": 116.4074,
+            "latitude": 39.9042,
+            "timezone": "Asia/Shanghai",
+        }
+        return {
+            "bazi": self.bazi,
+            "gender": self.gender or "male",
+            "birth_datetime": self.birth_datetime
+            or datetime.now().isoformat(timespec="seconds"),
+            "location": location,
+        }
 
 
 @dataclass

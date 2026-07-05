@@ -53,6 +53,23 @@ def _load_default_callables() -> Dict[str, SystemCallable]:
         logger = setup_logger("MultiDestinyAnalyzer")
         logger.debug("Qi Zheng analyzer not available for ensemble: %s", exc)
 
+    try:
+        from tools.ziwei.engine import ZiWeiAnalyzer
+
+        _zw_analyzer = ZiWeiAnalyzer()
+
+        async def _ziwei_caller(chart: ChartInfo, question: str) -> Dict[str, Any]:
+            return await _zw_analyzer.analyze(
+                chart.ziwei_chart_info(), question=question
+            )
+
+        callables["ziwei"] = _ziwei_caller
+    except Exception as exc:  # pragma: no cover
+        from utils.logger import setup_logger
+
+        logger = setup_logger("MultiDestinyAnalyzer")
+        logger.debug("Zi Wei analyzer not available for ensemble: %s", exc)
+
     return callables
 
 
