@@ -73,11 +73,13 @@ N/A（本次无法执行有效对比）
 ## 本次本地验证结果
 
 - `ruff check .`：All checks passed!
-- `python -m pytest tests/ -q`：**619 passed**（68 个测试模块）
+- `python -m pytest tests/ -q`：**635 passed**（70 个测试模块）
 - 新增 `tools/bazi_ai/bazi_structural.py`、`tools/bazi_ai/calendar.py`、`tools/bazi_ai/build_yangyan_kb.py`、杨炎八字绝技案例库与对应测试
 - 新增 `tools/qizheng/calendar.py`、七政四余年运分析与对应测试
 - 新增 `web/` React + Vite 命镜前端（含构建产物 `web/dist/`）与 `tests/test_frontend_serve.py`
 - 新增 `server/app.py` 七政与多命理融合端点及 `tests/test_server_qizheng.py`
+- 新增 `tools/destiny/calibrator.py` 事件校准引擎与 `tests/test_destiny_calibrator.py`、`tests/test_server_calibration.py`
+- 修复 `tests/test_audio_extraction.py` hypothesis 策略在 Windows 上的非法文件名问题
 - 工作区已整理并分批提交，文档已同步
 
 ## 备注

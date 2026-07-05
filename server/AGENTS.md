@@ -59,6 +59,9 @@ The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are liste
 | POST | `/api/v1/destiny/council` | Multi-Agent council debate |
 | POST | `/api/v1/destiny/daily` | Daily weather / energy reading |
 | GET | `/api/v1/destiny/systems` | List available destiny systems |
+| POST | `/api/v1/charts/{chart_id}/events` | Record a life event for calibration |
+| GET | `/api/v1/charts/{chart_id}/events` | List recorded life events |
+| POST | `/api/v1/charts/{chart_id}/calibrate` | Calibrate system weights against events |
 
 ## For AI Agents
 
@@ -76,7 +79,7 @@ The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are liste
 - Desktop adds license/DRM checks and UI-specific progress reporting; CLI does not.
 
 ### Testing Requirements
-- Tests: `tests/test_server.py`, `tests/test_server_bazi.py`, `tests/test_server_enhance.py`, `tests/test_server_qizheng.py`, `tests/test_frontend_serve.py`
+- Tests: `tests/test_server.py`, `tests/test_server_bazi.py`, `tests/test_server_enhance.py`, `tests/test_server_qizheng.py`, `tests/test_frontend_serve.py`, `tests/test_server_calibration.py`
 - Mock FastAPI dependencies; do not hit real Douyin API or launch real browsers.
 
 ### Common Patterns

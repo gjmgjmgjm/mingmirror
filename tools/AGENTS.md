@@ -39,6 +39,7 @@ Standalone utility scripts — not part of the core download pipeline.
 | `ziwei/engine.py` | Zi Wei Dou Shu analyzer |
 | `ziwei/prompts.py` | System and user prompts for Zi Wei LLM analysis |
 | `destiny/ensemble.py` | Multi-destiny analyzer with pluggable agent strategies |
+| `destiny/calibrator.py` | Event calibration engine: match life events to predictions and adjust system weights |
 | `destiny/benchmark_v2.py` | Quantitative benchmark against human-annotated cases |
 | `destiny/strategies/reflection.py` | Self-critique and revision strategy |
 | `destiny/strategies/debate.py` | Multi-system debate and consensus strategy |
@@ -73,6 +74,7 @@ Standalone utility scripts — not part of the core download pipeline.
 - Tests: `tests/test_bazi_calendar.py` covers lunar-calendar / solar-term utilities
 - Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_qizheng_calendar.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
 - Tests: `tests/test_destiny_reflection.py`, `tests/test_destiny_debate.py`, `tests/test_destiny_benchmark_v2.py` cover the new agent strategies and benchmark
+- Tests: `tests/test_destiny_calibrator.py` covers event scoring, storage, and calibration aggregation
 
 ### Common Patterns
 - Playwright async API for browser automation
