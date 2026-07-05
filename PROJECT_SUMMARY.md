@@ -146,6 +146,7 @@ Downloaded/
 - ✅ 事件校准支持录入重大事件、按领域匹配各命理系统预测、输出系统权重与时辰偏移建议
 - ✅ 实现 PRD 模块 6「命运剧本」：`tools/destiny/script_writer.py` + `POST /api/v1/destiny/script`
 - ✅ 命运剧本输出 RPG 角色卡（天赋/弱点/当前章节/下一章预告）+ 按大运分章的人生剧本
+- ✅ 新增前端 `/script` 页面展示命运剧本，并加入导航
 
 
 ## 7. 测试与验证
@@ -167,7 +168,7 @@ PYTHONPATH=. pytest -q
 
 ## 8. 后续建议
 
-1. 新增前端 `/script` 页面展示命运剧本。
+1. 将事件校准结果持久化到 SQLite/PostgreSQL（当前为内存存储）。
 2. 将事件校准结果持久化到 SQLite/PostgreSQL（当前为内存存储）。
 3. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
 4. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
