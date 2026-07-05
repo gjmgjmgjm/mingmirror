@@ -21,7 +21,10 @@ Standalone utility scripts — not part of the core download pipeline.
 | `build_knowledge_base_v3.py` | AI-assisted dialogue analysis for higher-quality knowledge bases |
 | `bazi_corrector.py` | Corrects common OCR/transcription errors in bazi strings |
 | `bazi_ai/bazi_validator.py` | Validates and normalizes four-pillar bazi strings against the 60 JiaZi cycle |
+| `bazi_ai/bazi_structural.py` | Structural profile extraction (day master, pattern, useful/taboo gods, pillar relations) |
 | `bazi_ai/case_builder.py` | Parses `_knowledge_final.md` into structured `cases.jsonl`; validates and deduplicates cases |
+| `bazi_ai/build_yangyan_kb.py` | Builds the Yangyan 八字绝技 structured case database from raw research materials |
+| `bazi_ai/calendar.py` | Lunar calendar / solar-term utilities for datetime-to-bazi conversion |
 | `bazi_ai/annotator.py` | Auto-labels cases with pattern, day-master strength, useful/taboo gods via LLM |
 | `bazi_ai/embeddings.py` | Optional sentence-transformer embedding cache for semantic RAG retrieval |
 | `bazi_ai/rule_checker.py` | Lightweight rule-based sanity checks for day-master strength and useful/taboo gods |
@@ -30,6 +33,11 @@ Standalone utility scripts — not part of the core download pipeline.
 | `bazi_ai/evaluator.py` | Consistency, format, case overlap, and leave-one-out benchmark evaluator |
 | `bazi_ai/benchmark.py` | CLI wrapper for `evaluate_leave_one_out()` |
 | `bazi_ai/cli.py` | Standalone CLI for `python -m tools.bazi_ai.cli` |
+| `qizheng/engine.py` | Qi Zheng Si Yu analyzer with natal / yearly interpretation |
+| `qizheng/calendar.py` | Astronomical calendar utilities for Qi Zheng calculations |
+| `qizheng/prompts.py` | System and user prompts for Qi Zheng LLM analysis |
+| `ziwei/engine.py` | Zi Wei Dou Shu analyzer |
+| `ziwei/prompts.py` | System and user prompts for Zi Wei LLM analysis |
 | `destiny/ensemble.py` | Multi-destiny analyzer with pluggable agent strategies |
 | `destiny/benchmark_v2.py` | Quantitative benchmark against human-annotated cases |
 | `destiny/strategies/reflection.py` | Self-critique and revision strategy |
@@ -47,7 +55,8 @@ Standalone utility scripts — not part of the core download pipeline.
   - `rapidocr-onnxruntime` for frame OCR
   - `opencv-python` for image handling
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
-- Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
+- Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, structural parser, calendar, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
+- `tools/bazi_ai/build_yangyan_kb.py` produces `bazi_knowledge/cases_yangyan.jsonl`; raw research materials are gitignored
 - Destiny analyzers (`tools/ziwei/`, `tools/qizheng/`, `tools/destiny/`) are optional and currently rely on core dependencies only; `requirements-destiny.txt` is a placeholder
 - `tools/destiny/strategies/` provides agent strategies: `reflection.py`, `debate.py`, `tool_caller.py`, `retriever.py`
 - `tools/destiny/benchmark_v2.py` runs quantitative evaluation against `tools/destiny/benchmark_data/annotated_cases.jsonl` and writes `benchmark_report.json`
@@ -61,7 +70,8 @@ Standalone utility scripts — not part of the core download pipeline.
 - Tests: `tests/test_bazi_tools.py` covers OCR parsing/assembly/correction helpers
 - Tests: `tests/test_bazi_cli.py` covers the reusable backend
 - Tests: `tests/test_bazi_validator.py`, `tests/test_bazi_ai.py`, `tests/test_bazi_ai_evaluator.py` cover validation, RAG, and evaluation
-- Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
+- Tests: `tests/test_bazi_calendar.py` covers lunar-calendar / solar-term utilities
+- Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_qizheng_calendar.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
 - Tests: `tests/test_destiny_reflection.py`, `tests/test_destiny_debate.py`, `tests/test_destiny_benchmark_v2.py` cover the new agent strategies and benchmark
 
 ### Common Patterns

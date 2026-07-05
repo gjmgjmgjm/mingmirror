@@ -38,6 +38,9 @@ A practical Douyin downloader supporting videos, image-notes, collections, music
 | **Comments collection** | Per-aweme comments (+ optional replies) saved as `*_comments.json` |
 | **Hot search + keyword search** | `--hot-board [N]` / `--search "keyword"` dumps to JSONL |
 | **REST API server mode** | `--serve --serve-port 8000` (optional `fastapi + uvicorn`) |
+| **Bazi (八字) analysis API** | `POST /api/v1/bazi/analyze` / `timeline` / `yearly` with DeepSeek + RAG |
+| **Zi Wei / Qi Zheng APIs** | `POST /api/v1/destiny/analyze` / `council` / `daily` multi-system fusion |
+| **Bundled web UI** | React + Vite MingMirror frontend served at `/app` |
 | **Notification push** | Bark / Telegram / Webhook on download completion |
 | Extra assets | Cover, music, avatar, JSON metadata |
 | Video transcription | Optional, using OpenAI Transcriptions API |
@@ -116,7 +119,23 @@ docker build -t douyin-downloader .
 docker run -v $(pwd)/config.yml:/app/config.yml -v $(pwd)/Downloaded:/app/Downloaded douyin-downloader
 ```
 
-### 6) Continuous Integration
+### 6) Run the MingMirror web UI (optional)
+
+The bundled React frontend is served automatically when running `--serve`. To develop or rebuild it:
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+Then start the server and open `http://127.0.0.1:8000/app`:
+
+```bash
+python run.py --serve --serve-port 8000
+```
+
+### 7) Continuous Integration
 
 Every push and pull request to `main`/`master` triggers the GitHub Actions workflow in `.github/workflows/ci.yml`.
 It runs the test matrix on Python 3.9–3.12, lints the code with `ruff`, and verifies the Docker build.

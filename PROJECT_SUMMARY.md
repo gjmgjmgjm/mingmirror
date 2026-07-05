@@ -4,8 +4,8 @@
 
 - **项目名称**: Douyin Downloader (`dy-downloader`)
 - **版本**: `2.0.0`
-- **更新时间**: `2026-07-01`
-- **当前状态**: ✅ 核心功能可用；`like/mix/music` 浏览器兜底、REST server 增强（取消/SSE/配置覆盖）、完整 CI/CD、紫微/七政/多系统命理融合均已落地；自动化测试 544 passed
+- **更新时间**: `2026-07-05`
+- **当前状态**: ✅ 核心功能可用；`like/mix/music` 浏览器兜底、REST server 增强（取消/SSE/配置覆盖）、完整 CI/CD、紫微/七政/多系统命理融合、React Web UI 均已落地；工作区已整理提交；自动化测试 619 passed
 
 
 ## 2. 当前实现能力（按代码现状）
@@ -46,6 +46,10 @@ dy-downloader/
 ├── auth/              # Cookie / token 管理
 ├── control/           # 限速、重试、并发队列
 ├── config/            # 配置加载与默认配置
+├── server/            # FastAPI REST server（下载任务 + 命理 API）
+├── tools/             # 独立工具：八字/紫微/七政/多命理融合
+├── web/               # React + Vite 命镜前端（已构建 dist/）
+├── tests/             # Pytest 测试套件
 └── utils/             # 日志与通用工具
 ```
 
@@ -110,7 +114,7 @@ Downloaded/
 8. 若开启数据库，写入 `aweme` 与 `download_history`
 
 
-## 6. 近期更新（2026-07-01）
+## 6. 近期更新（2026-07-05）
 
 - ✅ 文件名和目录日期从“下载时间”改为“作品发布时间（`create_time`）”
 - ✅ 新增独立下载清单 `download_manifest.jsonl`
@@ -124,13 +128,20 @@ Downloaded/
 - ✅ 案例自动标注器（格局、身强身弱、用神忌神）
 - ✅ 规则校验层（旺衰/用神忌神逻辑检查）
 - ✅ 多轮一致性聚合（ensemble）降低 LLM 方差
-- ✅ 新增 bazi REST API（analyze / cases / extract / feedback）
+- ✅ 新增 bazi REST API（analyze / timeline / yearly / from_datetime / cases / extract / feedback）
+- ✅ bazi_ai 支持额外案例库/知识库路径与环境变量覆盖（`DOUYIN_BAZI_AI_*`）
+- ✅ 新增八字结构分析器（`bazi_structural.py`）与农历/节气日历模块（`calendar.py`）
+- ✅ 新增杨炎八字绝技案例知识库（清洗后的 `cases_yangyan.jsonl`）
 - ✅ REST server 增强：job 取消、SSE 事件流、运行时配置覆盖
+- ✅ 新增 qizheng（七政四余）分析 API（analyze / yearly）
+- ✅ 新增 destiny（多命理融合）API（analyze / council / daily / systems）
 - ✅ `like/mix/music` 用户模式增加浏览器兜底（`core/user_modes/browser_fallback.py`）
 - ✅ GitHub Actions CI：lint / test(3.9–3.12) / compat / optional-deps / docker
 - ✅ 紫微斗数（Zi Wei）分析引擎
 - ✅ 七政四余（Qi Zheng）分析引擎
 - ✅ 多命理系统对齐融合层（`tools/destiny/`）
+- ✅ 新增 React + Vite 命镜 Web UI（Dashboard / Chart / Yearly / Qizheng / Council / Sandbox / Calendar）
+- ✅ 整理工作区：修复 lint、分批提交、同步文档
 
 
 ## 7. 测试与验证
@@ -144,7 +155,7 @@ PYTHONPATH=. pytest -q
 结果：
 
 ```text
-544 passed, 0 failed, 0 error
+619 passed, 0 failed, 0 error
 ```
 
 说明：测试套件持续增长，当前已无跳过项；`pytest-asyncio` deprecation warning 已配置忽略。
@@ -152,6 +163,8 @@ PYTHONPATH=. pytest -q
 
 ## 8. 后续建议
 
-1. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
-2. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
-3. 将 `tools/destiny/` 集成到 CLI 与 REST server（`--systems` 参数、`POST /api/v1/destiny/analyze`）。
+1. 实现 PRD 模块 3「事件校准引擎」：录入用户重大事件、反推时辰、校准 Agent 权重。
+2. 实现 PRD 模块 6「命运剧本」：RPG 角色卡 + 大运章节叙事。
+3. 为 `download_manifest.jsonl` 增加轮转或归档策略（长期运行场景）。
+4. 补充数据库查询 CLI（例如按作者/日期/标签检索）。
+5. 将 `tools/destiny/`  deeper 集成到 CLI（`--systems` 参数）与更多 REST 端点。

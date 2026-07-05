@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Optional FastAPI/uvicorn REST server for douyin-downloader. Exposes HTTP endpoints to submit download jobs, query status, cancel jobs, stream status updates via SSE, and apply runtime config overrides. Also hosts optional bazi (八字) analysis endpoints under `/api/v1/bazi/`.
+Optional FastAPI/uvicorn REST server for douyin-downloader. Exposes HTTP endpoints to submit download jobs, query status, cancel jobs, stream status updates via SSE, and apply runtime config overrides. Also hosts optional MingMirror destiny analysis endpoints under `/api/v1/bazi/`, `/api/v1/qizheng/`, and `/api/v1/destiny/`, and serves the bundled React web UI at `/app`.
 
 The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are listed under `[project.optional-dependencies]` in `pyproject.toml`.
 
@@ -37,9 +37,28 @@ The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are liste
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/bazi/analyze` | Analyze a single bazi string with DeepSeek + RAG |
+| POST | `/api/v1/bazi/timeline` | Return DaYun timeline for a bazi |
+| POST | `/api/v1/bazi/yearly` | Yearly fine-grained analysis for a given year range |
+| POST | `/api/v1/bazi/from_datetime` | Convert birth datetime to bazi pillars |
 | GET | `/api/v1/bazi/cases` | List structured bazi cases used for retrieval |
 | POST | `/api/v1/bazi/extract` | Run OCR-based bazi extraction over downloaded videos |
 | POST | `/api/v1/bazi/feedback` | Record feedback for a bazi analysis |
+
+### Qi Zheng (七政四余) Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/qizheng/analyze` | Qi Zheng natal chart analysis |
+| POST | `/api/v1/qizheng/yearly` | Qi Zheng yearly analysis |
+
+### Destiny (多命理融合) Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/destiny/analyze` | Multi-system (bazi/ziwei/qizheng) analysis |
+| POST | `/api/v1/destiny/council` | Multi-Agent council debate |
+| POST | `/api/v1/destiny/daily` | Daily weather / energy reading |
+| GET | `/api/v1/destiny/systems` | List available destiny systems |
 
 ## For AI Agents
 
@@ -57,7 +76,7 @@ The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are liste
 - Desktop adds license/DRM checks and UI-specific progress reporting; CLI does not.
 
 ### Testing Requirements
-- Tests: `tests/test_server.py`, `tests/test_server_bazi.py`, `tests/test_server_enhance.py`
+- Tests: `tests/test_server.py`, `tests/test_server_bazi.py`, `tests/test_server_enhance.py`, `tests/test_server_qizheng.py`, `tests/test_frontend_serve.py`
 - Mock FastAPI dependencies; do not hit real Douyin API or launch real browsers.
 
 ### Common Patterns

@@ -4,7 +4,7 @@
 
 ## 检查日期
 
-2026-07-01
+2026-07-05
 
 ## 检查环境
 
@@ -73,10 +73,12 @@ N/A（本次无法执行有效对比）
 ## 本次本地验证结果
 
 - `ruff check .`：All checks passed!
-- `python -m pytest tests/ -q`：**567 passed**（60 个测试模块）
-- 新增 `tools/destiny/strategies/`（reflection / debate / tool_caller / retriever）、`tools/destiny/benchmark_v2.py`、40 条人工标注案例与对应测试
-- `MultiDestinyAnalyzer` 新增 `strategy` 参数，默认 `"single"` 保持向后兼容
-- `tools/ziwei/` 与 `tools/qizheng/` 增加 `examples.jsonl` few-shot 示例
+- `python -m pytest tests/ -q`：**619 passed**（68 个测试模块）
+- 新增 `tools/bazi_ai/bazi_structural.py`、`tools/bazi_ai/calendar.py`、`tools/bazi_ai/build_yangyan_kb.py`、杨炎八字绝技案例库与对应测试
+- 新增 `tools/qizheng/calendar.py`、七政四余年运分析与对应测试
+- 新增 `web/` React + Vite 命镜前端（含构建产物 `web/dist/`）与 `tests/test_frontend_serve.py`
+- 新增 `server/app.py` 七政与多命理融合端点及 `tests/test_server_qizheng.py`
+- 工作区已整理并分批提交，文档已同步
 
 ## 备注
 
