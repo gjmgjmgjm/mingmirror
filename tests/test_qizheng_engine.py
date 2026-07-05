@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tools.qizheng.engine import QiZhengAnalyzer
+from tools.qizheng.engine import QiZhengAnalyzer, analyze_yearly
 
 
 @pytest.fixture
@@ -133,3 +133,54 @@ def run_sync(coro):
     import asyncio
 
     return asyncio.run(coro)
+
+
+def test_analyze_yearly_mock_fallback():
+    result = run_sync(
+        analyze_yearly(
+            "甲子 丙寅 戊辰 庚午",
+            gender="male",
+            birth_year=1984,
+            mode="10y",
+            api_key="",
+        )
+    )
+    assert "error" not in result
+    assert result.get("dayun_summary")
+    assert result.get("yearly_analysis")
+    assert len(result["yearly_analysis"]) == 10
+    assert result.get("_rule_based") is True
+    assert result["confidence"] == "low"
+    for y in result["yearly_analysis"]:
+        assert all(k in y for k in ("year", "pillar", "overview", "career", "wealth", "marriage", "health", "caution"))
+
+
+def test_analyze_yearly_invalid_chart():
+    result = run_sync(
+        analyze_yearly(
+            "不是八字",
+            gender="male",
+            birth_year=1984,
+            mode="10y",
+            api_key="",
+        )
+    )
+    assert "error" in result
+    assert result["dayun_summary"] == []
+    assert result["yearly_analysis"] == []
+
+
+def test_analyze_yearly_lifetime_mode():
+    result = run_sync(
+        analyze_yearly(
+            "甲子 丙寅 戊辰 庚午",
+            gender="male",
+            birth_year=1984,
+            mode="lifetime",
+            api_key="",
+        )
+    )
+    assert "error" not in result
+    assert result.get("dayun_summary")
+    assert result.get("yearly_analysis")
+    assert result.get("_rule_based") is True
