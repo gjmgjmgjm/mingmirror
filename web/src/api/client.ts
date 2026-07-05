@@ -335,3 +335,58 @@ export function fetchDailyFortune(
     body: JSON.stringify(payload),
   });
 }
+
+export interface DestinyScriptTalent {
+  name: string;
+  description: string;
+}
+
+export interface DestinyScriptWeakness {
+  name: string;
+  description: string;
+}
+
+export interface DestinyScriptCharacterCard {
+  day_master: string;
+  pattern: string;
+  strength: string;
+  talents: DestinyScriptTalent[];
+  weaknesses: DestinyScriptWeakness[];
+  current_chapter: string;
+  next_chapter_preview: string;
+}
+
+export interface DestinyScriptChapter {
+  index: number;
+  pillar: string;
+  age_range: string;
+  year_range: string;
+  theme: string;
+  challenge: string;
+  opportunity: string;
+  advice: string;
+  key_events: string[];
+}
+
+export interface DestinyScriptResponse {
+  character_card: DestinyScriptCharacterCard;
+  chapters: DestinyScriptChapter[];
+  opening: string;
+  closing: string;
+}
+
+export interface DestinyScriptRequest {
+  bazi: string;
+  gender?: string;
+  birth_datetime?: string;
+  birth_year?: number;
+}
+
+export function fetchDestinyScript(
+  payload: DestinyScriptRequest
+): Promise<DestinyScriptResponse> {
+  return fetchJson<DestinyScriptResponse>("/destiny/script", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
