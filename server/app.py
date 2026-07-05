@@ -14,6 +14,7 @@ import asyncio
 import json
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -75,6 +76,47 @@ class BaziAnalyzeResponse(BaseModel):
     result: Dict[str, Any]
 
 
+class BaziTimelineRequest(BaseModel):
+    bazi: str
+    gender: str = ""
+    birth_date: str = ""
+    birth_time: str = "00:00"
+    calendar_type: str = "solar"
+    until_age: int = 80
+
+
+class BaziTimelineResponse(BaseModel):
+    bazi: str
+    dayun: List[Dict[str, Any]]
+    liunian: List[Dict[str, Any]]
+
+
+class BaziYearlyRequest(BaseModel):
+    bazi: str
+    gender: str = ""
+    birth_date: str = ""
+    birth_time: str = "00:00"
+    calendar_type: str = "solar"
+    mode: str = "10y"
+
+
+class BaziYearlyResponse(BaseModel):
+    bazi: str
+    mode: str
+    result: Dict[str, Any]
+
+
+class BaziFromDatetimeRequest(BaseModel):
+    birth_datetime: str
+    calendar_type: str = "solar"
+
+
+class BaziFromDatetimeResponse(BaseModel):
+    bazi: str
+    pillars: Dict[str, str]
+    calendar_type: str
+
+
 class BaziExtractRequest(BaseModel):
     user_dir: str
     duration: int = 60
@@ -94,6 +136,64 @@ class BaziFeedbackRequest(BaseModel):
     bazi: str
     correct: bool
     note: str = ""
+
+
+class QizhengAnalyzeRequest(BaseModel):
+    bazi: str
+    question: str = ""
+
+
+class QizhengAnalyzeResponse(BaseModel):
+    bazi: str
+    result: Dict[str, Any]
+
+
+class QizhengYearlyRequest(BaseModel):
+    bazi: str
+    gender: str = ""
+    birth_year: int = 0
+    mode: str = "10y"
+
+
+class QizhengYearlyResponse(BaseModel):
+    bazi: str
+    mode: str
+    result: Dict[str, Any]
+
+
+class DestinyAnalyzeRequest(BaseModel):
+    bazi: str
+    question: str = ""
+    systems: List[str] = ["bazi"]
+    strategy: str = "single"
+    gender: Optional[str] = None
+    birth_datetime: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
+
+
+class DestinyAnalyzeResponse(BaseModel):
+    bazi: str
+    question: str
+    per_system: List[Dict[str, Any]]
+    aligned: Dict[str, Any]
+    final_summary: str
+    overall_confidence: str
+    strategy: Optional[str] = None
+
+
+class DestinyCouncilRequest(BaseModel):
+    bazi: str
+    question: str = ""
+    systems: List[str] = ["bazi", "qizheng"]
+    strategy: str = "debate"
+    gender: Optional[str] = None
+    birth_datetime: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
+
+
+class DestinyDailyRequest(BaseModel):
+    bazi: str
+    date: Optional[str] = None  # ISO format; defaults to today
 
 
 class ConfigOverrideRequest(BaseModel):
@@ -332,15 +432,155 @@ def build_app(config: ConfigLoader) -> FastAPI:
         embedding_cache = ai_cfg.get("embedding_cache")
         embedding_cache_path = Path(embedding_cache) if embedding_cache else None
 
+        def _to_paths(key: str) -> List[Path]:
+            values = ai_cfg.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            return [Path(v) for v in values if v]
+
         result = await analyze_bazi(
             req.bazi.strip(),
             question=req.question,
             cases_path=cases_path,
             knowledge_base_path=knowledge_path,
+            extra_cases_paths=_to_paths("extra_cases_paths"),
+            extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
             embedding_cache_path=embedding_cache_path,
             top_k=min(max(req.top_k, 1), 10),
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
         )
         return BaziAnalyzeResponse(bazi=req.bazi, result=result)
+
+    def _birth_year(birth_date: str) -> Optional[int]:
+        try:
+            return int(birth_date.split("-")[0])
+        except (ValueError, AttributeError):
+            return None
+
+    @app.post("/api/v1/bazi/timeline", response_model=BaziTimelineResponse)
+    async def bazi_timeline(req: BaziTimelineRequest) -> BaziTimelineResponse:
+        """Return DaYun and Liunian pillars for a chart."""
+        from tools.bazi_ai.calendar import dayun_list, liunian_list
+
+        dayun = dayun_list(
+            req.bazi.strip(),
+            req.gender,
+            req.birth_date,
+            req.birth_time,
+            req.calendar_type,
+            until_age=req.until_age,
+        )
+        birth_year = _birth_year(req.birth_date)
+        if birth_year:
+            for d in dayun:
+                start = birth_year + int(d["start_age"])
+                end = birth_year + int(d["end_age"])
+                d["start_year"] = start
+                d["end_year"] = end
+
+        current_year = datetime.now().year
+        start_year = birth_year or current_year
+        end_year = start_year + req.until_age - 1
+        liunian = liunian_list(start_year, end_year)
+        return BaziTimelineResponse(bazi=req.bazi, dayun=dayun, liunian=liunian)
+
+    @app.post("/api/v1/bazi/yearly", response_model=BaziYearlyResponse)
+    async def bazi_yearly(req: BaziYearlyRequest) -> BaziYearlyResponse:
+        """Generate a detailed yearly luck analysis."""
+        from tools.bazi_ai.engine import analyze_yearly
+
+        ai_cfg = config.get("bazi_ai") or {}
+        knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
+
+        result = await analyze_yearly(
+            req.bazi.strip(),
+            gender=req.gender,
+            birth_date=req.birth_date,
+            birth_time=req.birth_time,
+            calendar_type=req.calendar_type,
+            mode=req.mode,
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            knowledge_base_path=knowledge_path,
+        )
+        return BaziYearlyResponse(bazi=req.bazi, mode=req.mode, result=result)
+
+    @app.post("/api/v1/bazi/from_datetime", response_model=BaziFromDatetimeResponse)
+    async def bazi_from_datetime(req: BaziFromDatetimeRequest) -> BaziFromDatetimeResponse:
+        """Derive bazi from a solar or lunar birth datetime."""
+        from datetime import datetime as _dt
+
+        from tools.bazi_ai.calendar import (
+            pillars_for_datetime,
+            pillars_for_lunar_datetime,
+        )
+
+        raw = req.birth_datetime.strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            dt = _dt.fromisoformat(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid datetime: {exc}")
+
+        calendar_type = req.calendar_type.strip().lower()
+        if calendar_type not in ("solar", "lunar"):
+            raise HTTPException(status_code=400, detail="calendar_type must be solar or lunar")
+
+        try:
+            if calendar_type == "lunar":
+                pillars = pillars_for_lunar_datetime(
+                    dt.year, dt.month, dt.day, dt.hour, dt.minute
+                )
+            else:
+                pillars = pillars_for_datetime(dt)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Bazi calculation failed: {exc}")
+
+        bazi = " ".join([pillars["year"], pillars["month"], pillars["day"], pillars["hour"]])
+        return BaziFromDatetimeResponse(
+            bazi=bazi, pillars=pillars, calendar_type=calendar_type
+        )
+
+    @app.post("/api/v1/qizheng/analyze", response_model=QizhengAnalyzeResponse)
+    async def analyze_qizheng(req: QizhengAnalyzeRequest) -> QizhengAnalyzeResponse:
+        """Analyze a four-pillar chart with Qi Zheng Si Yu."""
+        from tools.qizheng.engine import QiZhengAnalyzer
+
+        ai_cfg = config.get("bazi_ai") or {}
+        analyzer = QiZhengAnalyzer(
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
+            cases_path=Path("./tools/qizheng/cases.jsonl"),
+        )
+        result = await analyzer.analyze({"bazi": req.bazi.strip()}, question=req.question)
+        return QizhengAnalyzeResponse(bazi=req.bazi, result=result)
+
+    @app.post("/api/v1/qizheng/yearly", response_model=QizhengYearlyResponse)
+    async def qizheng_yearly(req: QizhengYearlyRequest) -> QizhengYearlyResponse:
+        """Generate a detailed yearly luck analysis with Qi Zheng Si Yu."""
+        from tools.qizheng.engine import analyze_yearly
+
+        ai_cfg = config.get("bazi_ai") or {}
+        birth_year = req.birth_year or None
+        if birth_year == 0:
+            birth_year = None
+        result = await analyze_yearly(
+            req.bazi.strip(),
+            gender=req.gender,
+            birth_year=birth_year,
+            mode=req.mode,
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
+        )
+        return QizhengYearlyResponse(bazi=req.bazi, mode=req.mode, result=result)
 
     @app.get("/api/v1/bazi/cases")
     async def list_bazi_cases() -> Dict[str, List[Dict[str, Any]]]:
@@ -408,10 +648,180 @@ def build_app(config: ConfigLoader) -> FastAPI:
             )
         return {"status": "ok"}
 
+    # ── 多学派命理端点 ──
+
+    def _build_bazi_caller() -> Optional[Any]:
+        """Build a bazi caller that respects the configured bazi_ai paths."""
+        try:
+            from tools.bazi_ai.engine import analyze_bazi
+        except Exception:  # pragma: no cover - optional subsystem
+            return None
+
+        ai_cfg = config.get("bazi_ai") or {}
+        cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
+        knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
+        embedding_cache = ai_cfg.get("embedding_cache")
+        embedding_cache_path = Path(embedding_cache) if embedding_cache else None
+
+        def _to_paths(key: str) -> List[Path]:
+            values = ai_cfg.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            return [Path(v) for v in values if v]
+
+        async def _caller(chart_info: Any, question: str) -> Dict[str, Any]:
+            return await analyze_bazi(
+                chart_info.bazi,
+                question=question,
+                cases_path=cases_path,
+                knowledge_base_path=knowledge_path,
+                extra_cases_paths=_to_paths("extra_cases_paths"),
+                extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
+                embedding_cache_path=embedding_cache_path,
+                top_k=ai_cfg.get("top_k", 3),
+            )
+
+        return _caller
+
+    def _build_qizheng_caller() -> Optional[Any]:
+        """Build a Qi Zheng Si Yu caller using the configured AI backend."""
+        try:
+            from tools.qizheng.engine import QiZhengAnalyzer
+        except Exception:  # pragma: no cover - optional subsystem
+            return None
+
+        ai_cfg = config.get("bazi_ai") or {}
+        package_dir = Path(__file__).resolve().parent.parent / "tools" / "qizheng"
+        analyzer = QiZhengAnalyzer(
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            rule_primer_path=package_dir / "rule_primer.md",
+            cases_path=package_dir / "cases.jsonl",
+        )
+
+        async def _caller(chart_info: Any, question: str) -> Dict[str, Any]:
+            return await analyzer.analyze({"bazi": chart_info.bazi}, question=question)
+
+        return _caller
+
+    def _destiny_analyze(req: Any, default_strategy: str) -> DestinyAnalyzeResponse:
+        """Run multi-destiny analysis and return a response model."""
+        try:
+            from tools.destiny.contract import ChartInfo
+            from tools.destiny.ensemble import MultiDestinyAnalyzer
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"destiny subsystem not available: {exc}",
+            ) from exc
+
+        strategy = req.strategy if req.strategy in (
+            "single", "reflection", "debate", "tool_augmented"
+        ) else default_strategy
+
+        callables: Dict[str, Any] = {}
+        bazi_caller = _build_bazi_caller()
+        if bazi_caller is not None:
+            callables["bazi"] = bazi_caller
+        qizheng_caller = _build_qizheng_caller()
+        if qizheng_caller is not None:
+            callables["qizheng"] = qizheng_caller
+
+        analyzer = MultiDestinyAnalyzer(
+            systems=req.systems,
+            callables=callables,
+            config=config.get("bazi_ai") or {},
+            strategy=strategy,
+        )
+        return analyzer, ChartInfo(
+            bazi=req.bazi.strip(),
+            question=req.question,
+            gender=req.gender,
+            birth_datetime=req.birth_datetime,
+            location=req.location,
+        )
+
+    @app.post("/api/v1/destiny/analyze", response_model=DestinyAnalyzeResponse)
+    async def destiny_analyze(req: DestinyAnalyzeRequest) -> DestinyAnalyzeResponse:
+        """Analyze a chart using one or more destiny systems."""
+        analyzer, chart = _destiny_analyze(req, default_strategy="single")
+        result = await analyzer.analyze(chart)
+        return DestinyAnalyzeResponse(
+            bazi=result.get("bazi", chart.bazi),
+            question=result.get("question", chart.question),
+            per_system=result.get("per_system", []),
+            aligned=result.get("aligned", {}),
+            final_summary=result.get("final_summary", ""),
+            overall_confidence=result.get("overall_confidence", "low"),
+            strategy=result.get("strategy"),
+        )
+
+    @app.post("/api/v1/destiny/council", response_model=DestinyAnalyzeResponse)
+    async def destiny_council(req: DestinyCouncilRequest) -> DestinyAnalyzeResponse:
+        """Run a multi-agent destiny council (debate/reflection) for a chart."""
+        analyzer, chart = _destiny_analyze(req, default_strategy="debate")
+        result = await analyzer.analyze(chart)
+        return DestinyAnalyzeResponse(
+            bazi=result.get("bazi", chart.bazi),
+            question=result.get("question", chart.question),
+            per_system=result.get("per_system", []),
+            aligned=result.get("aligned", {}),
+            final_summary=result.get("final_summary", ""),
+            overall_confidence=result.get("overall_confidence", "low"),
+            strategy=result.get("strategy"),
+        )
+
+    @app.post("/api/v1/destiny/daily")
+    async def destiny_daily(req: DestinyDailyRequest) -> Dict[str, Any]:
+        """Return a simplified daily fortune reading for a bazi chart."""
+        try:
+            from tools.bazi_ai.calendar import daily_fortune
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"calendar subsystem not available: {exc}",
+            ) from exc
+
+        target_date = None
+        if req.date:
+            from datetime import date as _date
+
+            try:
+                target_date = _date.fromisoformat(req.date)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"invalid date format: {exc}",
+                ) from exc
+
+        return daily_fortune(req.bazi.strip(), target_date)
+
+    @app.get("/api/v1/destiny/systems")
+    async def list_destiny_systems() -> Dict[str, List[str]]:
+        """List destiny systems that are currently available."""
+        available = []
+        if _build_bazi_caller() is not None:
+            available.append("bazi")
+        for module in ("tools.qizheng.engine", "tools.ziwei.engine"):
+            try:
+                __import__(module)
+                available.append(module.split(".")[1])
+            except Exception:  # pragma: no cover - optional subsystem
+                pass
+        return {
+            "available": available,
+            "all": ["bazi", "ziwei", "qizheng"],
+        }
+
     # Serve the bundled frontend web UI under /app; redirect root to it.
+    # Prefer the modern React build in web/dist; fall back to the legacy
+    # frontend/ directory if the React app has not been built yet.
+    web_dist_dir = Path(__file__).resolve().parents[1] / "web" / "dist"
     frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
-    if frontend_dir.is_dir():
-        app.mount("/app", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+    static_dir = web_dist_dir if web_dist_dir.is_dir() else frontend_dir
+    if static_dir.is_dir():
+        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="frontend")
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:

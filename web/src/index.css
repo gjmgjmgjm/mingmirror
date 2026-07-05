@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;700&family=Zhi+Mang+Xing&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-ink-100 text-ink-700 font-serif antialiased;
+  }
+
+  .dark body {
+    @apply bg-ink-900 text-ink-200;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-ink-300/20 bg-white/80 shadow-lg backdrop-blur-sm;
+  }
+
+  .dark .panel {
+    @apply bg-ink-800/80 border-ink-500/20;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl bg-vermilion px-6 py-3 font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50 disabled:hover:translate-y-0;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-ink-300/40 bg-ink-100/50 px-4 py-3 text-ink-700 outline-none transition focus:border-vermilion focus:ring-2 focus:ring-vermilion/20;
+  }
+
+  .dark .input {
+    @apply bg-ink-800/50 border-ink-500/40 text-ink-200;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

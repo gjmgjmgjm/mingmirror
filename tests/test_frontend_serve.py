@@ -33,10 +33,12 @@ def test_frontend_index_served(client):
     resp = client.get("/app/index.html")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
-    assert "命盘" in resp.text
+    assert "命镜" in resp.text or "MingMirror" in resp.text
 
 
-def test_frontend_static_css_inlined(client):
+def test_frontend_static_assets_linked(client):
     resp = client.get("/app/index.html")
     assert resp.status_code == 200
-    assert "--ink-900" in resp.text
+    # Vite build produces <script type="module" src="/assets/index-*.js">
+    assert "<script type=\"module\"" in resp.text
+    assert "/assets/index-" in resp.text

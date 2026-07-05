@@ -112,6 +112,59 @@ def test_get_unknown_job_returns_404(tmp_path):
         assert resp.status_code == 404
 
 
+def test_destiny_systems_endpoint(tmp_path):
+    config = ConfigLoader(None)
+    config.update(path=str(tmp_path))
+    app = build_app(config)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/destiny/systems")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "bazi" in data["all"]
+        assert isinstance(data["available"], list)
+
+
+def test_destiny_analyze_endpoint(tmp_path):
+    config = ConfigLoader(None)
+    config.update(path=str(tmp_path))
+    app = build_app(config)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/destiny/analyze",
+            json={"bazi": "甲子 丙寅 戊辰 庚午", "question": "事业如何？"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["bazi"] == "甲子 丙寅 戊辰 庚午"
+        assert "per_system" in data
+        assert "aligned" in data
+        assert "final_summary" in data
+
+
+def test_destiny_council_endpoint(tmp_path):
+    config = ConfigLoader(None)
+    config.update(path=str(tmp_path))
+    app = build_app(config)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/destiny/council",
+            json={
+                "bazi": "乙卯 戊寅 庚子 丙子",
+                "question": "婚姻",
+                "systems": ["bazi"],
+                "strategy": "debate",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["bazi"] == "乙卯 戊寅 庚子 丙子"
+        assert data.get("strategy") == "debate"
+        assert "aligned" in data
+
+
 def test_build_app_shares_deps_across_requests(tmp_path):
     """重请求应复用同一个 FileManager / RateLimiter 等（避免每次重建）。"""
     config = ConfigLoader(None)
