@@ -104,11 +104,20 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "glossary": "bazi_glossary.json",
         "output_dir": "./bazi_knowledge",
     },
-    # AI 八字分析（可选，需 DeepSeek API Key）。
+    # AI 八字分析（可选，需 LLM API Key）。
+    # 优先读取环境变量 DOUYIN_BAZI_AI_API_KEY / DOUYIN_BAZI_AI_BASE_URL /
+    # DOUYIN_BAZI_AI_MODEL；未设置时回退到 DEEPSEEK_* 环境变量。
     "bazi_ai": {
         "enabled": False,
+        "api_key": "",
+        "base_url": "",
         "cases": "./bazi_knowledge/cases.jsonl",
         "knowledge_base": "./bazi_knowledge/rule_primer.md",
+        # 可选：额外加载本地研究用的案例库/知识库。
+        # 这些路径不会被默认启用，也不会进入发布产物；仅供个人本地研究，
+        # 请确保你拥有相应资料的合法使用权。
+        "extra_cases_paths": [],
+        "extra_knowledge_base_paths": [],
         "embedding_cache": "./bazi_knowledge/cases.pkl",
         "top_k": 3,
         "model": "deepseek-chat",

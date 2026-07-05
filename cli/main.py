@@ -394,6 +394,15 @@ async def _run_bazi_subcommand(args, config: ConfigLoader) -> None:
         embedding_cache = ai_cfg.get("embedding_cache")
         embedding_cache_path = Path(embedding_cache) if embedding_cache else None
         ensemble_runs = int(ai_cfg.get("ensemble_runs", 1))
+
+        def _cfg_paths(key: str):
+            values = ai_cfg.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            return [Path(v) for v in values if v]
+
+        extra_cases_paths = _cfg_paths("extra_cases_paths")
+        extra_knowledge_base_paths = _cfg_paths("extra_knowledge_base_paths")
         display.print_info(f"正在分析八字：{bazi}")
 
         if ensemble_runs > 1:
@@ -405,6 +414,8 @@ async def _run_bazi_subcommand(args, config: ConfigLoader) -> None:
                 runs=ensemble_runs,
                 cases_path=cases_path,
                 knowledge_base_path=knowledge_path,
+                extra_cases_paths=extra_cases_paths,
+                extra_knowledge_base_paths=extra_knowledge_base_paths,
                 embedding_cache_path=embedding_cache_path,
                 top_k=ai_cfg.get("top_k", 3),
             )
@@ -416,6 +427,8 @@ async def _run_bazi_subcommand(args, config: ConfigLoader) -> None:
                 question=args.bazi_question,
                 cases_path=cases_path,
                 knowledge_base_path=knowledge_path,
+                extra_cases_paths=extra_cases_paths,
+                extra_knowledge_base_paths=extra_knowledge_base_paths,
                 embedding_cache_path=embedding_cache_path,
                 top_k=ai_cfg.get("top_k", 3),
             )

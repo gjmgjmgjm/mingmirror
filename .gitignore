@@ -14,6 +14,7 @@ htmlcov/
 # Build/package artifacts
 build/
 dist/
+!web/dist/
 .eggs/
 *.egg-info/
 pip-wheel-metadata/
@@ -53,3 +54,17 @@ config/cookies.json
 .vscode/
 .omc/
 .gstack/
+
+# Frontend dependencies
+web/node_modules/
+
+# Temporary API response dumps
+*.resp.json
+
+# Local research raw materials (cleaned case databases are kept)
+bazi_knowledge/杨炎八字绝技_raw.txt
+bazi_knowledge/杨炎八字绝技_cleaned.txt
+bazi_knowledge/杨炎八字绝技_knowledge_final.md
+bazi_knowledge/杨炎八字绝技_mnemonics.md
+bazi_knowledge/杨炎八字绝技_rulebook.md
+bazi_knowledge/杨炎八字绝技_rulebook_compact.md

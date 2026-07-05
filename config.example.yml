@@ -129,6 +129,12 @@ bazi_ai:
   enabled: false
   cases: ./bazi_knowledge/cases.jsonl
   knowledge_base: ./bazi_knowledge/rule_primer.md
+  # 可选：加载本地私有/研究用的额外案例库或知识库。
+  # 默认不启用；如需使用，请自行准备合法资料并填写路径。
+  # extra_cases_paths:
+  #   - ./bazi_knowledge/cases_yangyan.jsonl
+  # extra_knowledge_base_paths:
+  #   - ./bazi_knowledge/杨炎八字绝技_rulebook_compact.md
   top_k: 3
   model: deepseek-chat
 

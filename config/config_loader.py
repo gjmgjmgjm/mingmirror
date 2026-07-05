@@ -47,7 +47,7 @@ class ConfigLoader:
         return result
 
     def _load_env_config(self) -> Dict[str, Any]:
-        env_config = {}
+        env_config: Dict[str, Any] = {}
         if os.getenv("DOUYIN_COOKIE"):
             env_config["cookie"] = os.getenv("DOUYIN_COOKIE")
         if os.getenv("DOUYIN_PATH"):
@@ -62,6 +62,17 @@ class ConfigLoader:
                 )
         if os.getenv("DOUYIN_PROXY"):
             env_config["proxy"] = os.getenv("DOUYIN_PROXY")
+
+        bazi_ai_env: Dict[str, Any] = {}
+        if os.getenv("DOUYIN_BAZI_AI_API_KEY"):
+            bazi_ai_env["api_key"] = os.getenv("DOUYIN_BAZI_AI_API_KEY")
+        if os.getenv("DOUYIN_BAZI_AI_BASE_URL"):
+            bazi_ai_env["base_url"] = os.getenv("DOUYIN_BAZI_AI_BASE_URL")
+        if os.getenv("DOUYIN_BAZI_AI_MODEL"):
+            bazi_ai_env["model"] = os.getenv("DOUYIN_BAZI_AI_MODEL")
+        if bazi_ai_env:
+            env_config["bazi_ai"] = bazi_ai_env
+
         return env_config
 
     def _normalize_mix_aliases(
