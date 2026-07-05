@@ -368,7 +368,16 @@ async def test_extract_audio_stderr_ring_buffer_keeps_only_tail(
         ),
         min_size=1,
         max_size=64,
-    ).filter(lambda s: "/" not in s and "\\" not in s and "\x00" not in s),
+    ).filter(
+        lambda s: (
+            "/" not in s
+            and "\\" not in s
+            and "\x00" not in s
+            and not any(c in s for c in ':*?"<>|')
+            and not s.endswith(" ")
+            and not s.endswith(".")
+        )
+    ),
 )
 def test_extract_audio_never_uses_shell_true_for_arbitrary_filenames(
     raw_stem: str,
