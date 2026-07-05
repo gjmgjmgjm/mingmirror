@@ -196,6 +196,20 @@ class DestinyDailyRequest(BaseModel):
     date: Optional[str] = None  # ISO format; defaults to today
 
 
+class DestinyScriptRequest(BaseModel):
+    bazi: str
+    gender: Optional[str] = None
+    birth_datetime: Optional[str] = None
+    birth_year: int = 1990
+
+
+class DestinyScriptResponse(BaseModel):
+    character_card: Dict[str, Any]
+    chapters: List[Dict[str, Any]]
+    opening: str
+    closing: str
+
+
 class EventCreateRequest(BaseModel):
     event_type: str
     happened_at: str  # ISO date or datetime
@@ -870,6 +884,37 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 ) from exc
 
         return daily_fortune(req.bazi.strip(), target_date)
+
+    @app.post("/api/v1/destiny/script", response_model=DestinyScriptResponse)
+    async def destiny_script(req: DestinyScriptRequest) -> DestinyScriptResponse:
+        """Generate a Destiny Script (RPG character card + life chapters)."""
+        try:
+            from tools.destiny.contract import ChartInfo
+            from tools.destiny.script_writer import ScriptWriter
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"destiny script subsystem not available: {exc}",
+            ) from exc
+
+        ai_cfg = config.get("bazi_ai") or {}
+        writer = ScriptWriter(
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+        )
+        chart = ChartInfo(
+            bazi=req.bazi.strip(),
+            gender=req.gender,
+            birth_datetime=req.birth_datetime,
+        )
+        result = await writer.write(chart, birth_year=req.birth_year)
+        return DestinyScriptResponse(
+            character_card=result.get("character_card", {}),
+            chapters=result.get("chapters", []),
+            opening=result.get("opening", ""),
+            closing=result.get("closing", ""),
+        )
 
     @app.get("/api/v1/destiny/systems")
     async def list_destiny_systems() -> Dict[str, List[str]]:
