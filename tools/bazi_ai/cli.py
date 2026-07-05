@@ -17,6 +17,8 @@ def main():
     parser.add_argument("-q", "--question", default="", help="命主具体问题")
     parser.add_argument("-c", "--cases", default="./bazi_knowledge/cases.jsonl", help="案例库路径")
     parser.add_argument("-k", "--knowledge", default="./bazi_knowledge/rule_primer.md", help="基础知识库路径")
+    parser.add_argument("--extra-cases", action="append", default=[], help="额外案例库路径（可多次指定，本地研究用途）")
+    parser.add_argument("--extra-knowledge", action="append", default=[], help="额外知识库路径（可多次指定，本地研究用途）")
     parser.add_argument("--top-k", type=int, default=3, help="检索相似案例数量")
     parser.add_argument("--api-key", default=None, help="DeepSeek API Key（默认读取 DEEPSEEK_API_KEY 环境变量）")
     parser.add_argument("--base-url", default=None, help="DeepSeek API Base URL")
@@ -30,6 +32,8 @@ def main():
             question=args.question,
             cases_path=Path(args.cases),
             knowledge_base_path=Path(args.knowledge),
+            extra_cases_paths=[Path(p) for p in args.extra_cases if p],
+            extra_knowledge_base_paths=[Path(p) for p in args.extra_knowledge if p],
             top_k=args.top_k,
             api_key=args.api_key,
             base_url=args.base_url,

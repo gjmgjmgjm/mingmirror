@@ -1,12 +1,24 @@
 # 八字命理知识库索引
 
+> **声明**：本目录中的「第三方资料」（例如标注为《杨炎八字绝技》来源的文件）仅供个人本地研究使用，**不是项目默认运行时依赖**。项目默认仅使用 `rule_primer.md` 与 `cases.jsonl` 中的通用/原创案例。使用任何第三方资料前，请确保你已获得合法授权或该资料属于可合理使用范围。
+
 ## 目录结构
 
 ```
 bazi_knowledge/
 ├── README.md                          # 本索引文件
-├── knowledge_base.md                  # PDF提取的基础知识
+├── knowledge_base.md                  # PDF提取的基础知识（铭道国学）
+├── rule_primer.md                     # AI 八字分析规则手册（通用）
+├── cases.jsonl                        # 默认运行时案例库（通用/原创视频案例）
 ├── 杨炎_knowledge_final.md            # 杨炎用户视频知识库（16个案例）
+├── 杨炎八字绝技_rulebook.md           # 《杨炎八字绝技》完整断六亲规则手册（本地研究）
+├── 杨炎八字绝技_rulebook_compact.md   # 《杨炎八字绝技》精简规则手册（本地研究）
+├── 杨炎八字绝技_mnemonics.md          # 《杨炎八字绝技》断六亲口诀集锦（本地研究）
+├── 杨炎八字绝技_knowledge_final.md    # 《杨炎八字绝技》实战案例库（本地研究）
+├── 杨炎八字绝技_cases.jsonl           # 《杨炎八字绝技》结构化案例 JSONL（本地研究）
+├── cases_yangyan.jsonl                # 同上，作为可选额外案例库的通用命名副本
+├── 杨炎八字绝技_raw.txt               # 《杨炎八字绝技》PDF 原始文本（本地研究）
+├── 杨炎八字绝技_cleaned.txt           # 《杨炎八字绝技》清洗后文本（本地研究）
 ├── 铭道国学_四柱八字基础知识.txt      # PDF OCR原始文本
 └── pdf_ocr_result.json                # PDF OCR识别结果
 ```
@@ -24,11 +36,49 @@ bazi_knowledge/
 - 地支关系（三合、六合、三刑等）
 - 命理分析方法
 
-### 2. 实战案例（来自视频转录）
+### 2. 通用规则手册
+
+**文件**：`rule_primer.md`
+
+包含内容：
+- 四柱排盘
+- 十神体系
+- 旺衰判断
+- 格局取法
+- 用神忌神
+- 干支关系
+- 分类断法（事业、财运、婚姻、健康）
+- 大运流年
+- 分析流程与输出原则
+
+### 3. 断六亲专项规则手册（本地研究资料，非默认启用）
+
+**文件**：`杨炎八字绝技_rulebook.md`、`杨炎八字绝技_rulebook_compact.md`、`杨炎八字绝技_mnemonics.md`
+
+来源：《杨炎八字绝技》PDF（309页）
+
+> 这些文件**不会**在默认运行时被加载。如需在本地研究时参考，请在 `config.yml` 的 `bazi_ai.extra_knowledge_base_paths` 中显式配置，并自行确保合法使用。
+
+`杨炎八字绝技_rulebook.md` 完整内容：
+- 六亲定位法则（年柱、月柱、日支、时柱）
+- 六亲吉凶断法（真假虚实、宫位受伤信号、暗克、独阴独阳）
+- 分论六亲（父母、兄弟、配偶、子女）
+- 六亲应期秘法（大运、流年）
+- 高级心法与特殊案例
+
+`杨炎八字绝技_rulebook_compact.md` 精简版：
+- 保留核心原则、核心心法、关键法则
+- 删除具体案例分析（避免与 RAG 案例库重复）
+- 由 `tools/bazi_ai/build_yangyan_kb.py` 自动生成
+
+`杨炎八字绝技_mnemonics.md` 口诀集锦：
+- 父母篇、夫妻篇、子女篇、兄弟篇、综合篇核心口诀
+
+### 4. 实战案例
 
 **文件**：`杨炎_knowledge_final.md`
 
-包含内容：
+`杨炎_knowledge_final.md` 包含内容：
 - 16个完整的八字分析案例
 - 每个案例包含：
   - 八字信息
@@ -36,6 +86,12 @@ bazi_knowledge/
   - 命主反馈
   - 关键术语
   - 主要结论
+
+**可选本地研究案例**：`杨炎八字绝技_knowledge_final.md`、`杨炎八字绝技_cases.jsonl`、`cases_yangyan.jsonl`
+
+- 约 90+ 条来自《杨炎八字绝技》的断六亲实战案例
+- 覆盖父母、兄弟、配偶、子女、应期等主题
+- 如需使用，请在 `config.yml` 的 `bazi_ai.extra_cases_paths` 中显式配置
 
 ## 案例列表
 
@@ -59,6 +115,24 @@ bazi_knowledge/
 | 16 | 乙丑 乙巳 癸丑 庚申 | 2025-02-18_解读 |
 
 ## 使用方法
+
+### 默认运行
+无需额外配置，系统使用：
+- `rule_primer.md` 作为基础知识
+- `cases.jsonl` 作为 RAG 案例库
+
+### 加载本地研究资料
+在 `config.yml` 中显式声明：
+
+```yaml
+bazi_ai:
+  cases: ./bazi_knowledge/cases.jsonl
+  knowledge_base: ./bazi_knowledge/rule_primer.md
+  extra_cases_paths:
+    - ./bazi_knowledge/cases_yangyan.jsonl
+  extra_knowledge_base_paths:
+    - ./bazi_knowledge/杨炎八字绝技_rulebook_compact.md
+```
 
 ### 按八字检索
 直接搜索八字，如：
@@ -90,9 +164,16 @@ bazi_knowledge/
 3. **可学习**：包含命理师分析和命主反馈
 4. **可扩展**：可以添加更多案例
 
+## 版权与合规提示
+
+- `cases.jsonl` 默认仅包含项目自有/通用案例。
+- 任何名称含「杨炎」或来源标注为第三方著作的文件，均为**本地研究资料**，不进入默认运行流程。
+- 请勿将受版权保护的资料直接作为项目默认知识库发布或商用。
+- 如需对外提供服务，建议仅使用自有案例、公开古籍或已获得授权的资料。
+
 ## 后续改进
 
-1. 添加更多视频案例
+1. 添加更多自有/授权视频案例
 2. 改进对话分析算法
 3. 增加术语解释
 4. 添加案例分类标签

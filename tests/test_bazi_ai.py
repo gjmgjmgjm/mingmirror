@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from tools.bazi_ai.case_builder import build_case_database, correct_text, extract_bazi
-from tools.bazi_ai.engine import retrieve_similar_cases
+from tools.bazi_ai.engine import (
+    _rule_based_yearly,
+    _strip_confidence_annotations,
+    retrieve_similar_cases,
+)
 
 
 class TestExtractBazi:
@@ -78,6 +82,57 @@ class TestRetrieveSimilarCases:
         results = await retrieve_similar_cases("乙卯 戊寅 庚子 丙子", "问事业", cases_path, top_k=1)
         assert len(results) == 1
         assert results[0]["bazi"] == "乙卯 戊寅 庚子 丙子"
+
+
+class TestStripConfidenceAnnotations:
+    def test_strips_chinese_confidence_marker(self):
+        assert _strip_confidence_annotations("适合技术行业。（置信度：low）") == "适合技术行业。"
+        assert _strip_confidence_annotations("适合技术行业(置信度:medium)") == "适合技术行业"
+        assert _strip_confidence_annotations("无标记文本") == "无标记文本"
+
+
+class TestRuleBasedYearly:
+    def test_fallback_avoids_template_phrases(self):
+        result = _rule_based_yearly(
+            "癸未 己未 甲申 壬申",
+            [
+                {"pillar": "戊午", "start_age": 0, "end_age": 8},
+                {"pillar": "丁巳", "start_age": 8, "end_age": 18},
+                {"pillar": "丙辰", "start_age": 18, "end_age": 28},
+                {"pillar": "乙卯", "start_age": 28, "end_age": 38},
+            ],
+            [{"year": 2026, "pillar": "丙午"}, {"year": 2027, "pillar": "丁未"}],
+            1993,
+        )
+        forbidden = {"顺其自然", "按部就班", "按年度节奏推进", "量入为出", "规律作息"}
+        combined = " ".join(
+            y.get("overview", "") + y.get("career", "") + y.get("wealth", "")
+            + y.get("marriage", "") + y.get("health", "")
+            for y in result["yearly_analysis"]
+        )
+        for phrase in forbidden:
+            assert phrase not in combined, f"fallback contains forbidden phrase: {phrase}"
+        assert result.get("_rule_based") is True
+        assert all("算法兜底" not in c for c in result.get("caveats", []))
+        assert all("AI 输出无法解析" not in c for c in result.get("caveats", []))
+
+    def test_fallback_includes_key_event_and_milestones(self):
+        result = _rule_based_yearly(
+            "癸未 己未 甲申 壬申",
+            [
+                {"pillar": "戊午", "start_age": 0, "end_age": 8},
+                {"pillar": "丁巳", "start_age": 8, "end_age": 18},
+                {"pillar": "丙辰", "start_age": 18, "end_age": 28},
+                {"pillar": "乙卯", "start_age": 28, "end_age": 38},
+            ],
+            [{"year": 2026, "pillar": "丙午"}, {"year": 2027, "pillar": "丁未"}],
+            1993,
+        )
+        for y in result["yearly_analysis"]:
+            assert "key_event" in y
+            assert isinstance(y["key_event"], str)
+            assert len(y["key_event"]) > 0
+        assert isinstance(result.get("milestones"), list)
 
     @pytest.mark.asyncio
     async def test_retrieve_empty(self, tmp_path: Path):
