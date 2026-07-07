@@ -474,6 +474,7 @@ def main() -> None:
     parser.add_argument("--model", default=None, help="LLM model name")
     parser.add_argument("--mock-answer", default=None, help="Use fixed letter for every question (for testing)")
     parser.add_argument("--timeout", type=float, default=30.0, help="Per-question LLM timeout in seconds")
+    parser.add_argument("--extra-cases", nargs="+", default=None, help="Additional case files for RAG")
     args = parser.parse_args()
 
     summary = asyncio.run(
@@ -489,6 +490,7 @@ def main() -> None:
             model=args.model,
             mock_answer=args.mock_answer,
             timeout_seconds=args.timeout,
+            extra_cases_paths=[Path(p) for p in args.extra_cases] if args.extra_cases else None,
         )
     )
 
