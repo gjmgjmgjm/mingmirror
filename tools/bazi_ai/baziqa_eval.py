@@ -350,6 +350,7 @@ async def run_evaluation(
     *,
     mode: str = "enhanced",
     limit: Optional[int] = None,
+    offset: int = 0,
     datasets: Optional[List[str]] = None,
     output: Optional[Path] = None,
     api_key: Optional[str] = None,
@@ -367,6 +368,7 @@ async def run_evaluation(
         data_dir: directory containing contest8_*.json and celebrity50_zh.json.
         mode: "baseline" or "enhanced".
         limit: optional max number of questions to evaluate.
+        offset: number of questions to skip from the start.
         datasets: list of dataset names to include (e.g. ["contest8", "celebrity50"]).
         output: optional path to write JSONL predictions.
         mock_answer: if set, bypass LLM and use this letter for every question.
@@ -385,6 +387,8 @@ async def run_evaluation(
         for q in person.get("questions", []):
             questions.append((person, q))
 
+    if offset > 0:
+        questions = questions[offset:]
     if limit is not None and limit > 0:
         questions = questions[:limit]
 
@@ -450,6 +454,7 @@ def main() -> None:
     parser.add_argument("--mode", choices=["baseline", "enhanced"], default="enhanced")
     parser.add_argument("--datasets", nargs="+", choices=["contest8", "celebrity50"], default=None)
     parser.add_argument("--limit", type=int, default=None, help="Max questions to evaluate")
+    parser.add_argument("--offset", type=int, default=0, help="Questions to skip")
     parser.add_argument("--output", default=None, help="Output JSONL path for predictions")
     parser.add_argument("--api-key", default=None, help="LLM API key")
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
@@ -462,6 +467,7 @@ def main() -> None:
             Path(args.data),
             mode=args.mode,
             limit=args.limit,
+            offset=args.offset,
             datasets=args.datasets,
             output=Path(args.output) if args.output else None,
             api_key=args.api_key,
