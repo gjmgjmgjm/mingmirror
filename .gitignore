@@ -40,6 +40,7 @@ dy_downloader.db
 *.sqlite3
 bazi_extract_*.txt
 bazi_knowledge/pdf_images/
+bazi_knowledge/knowledge.pkl
 
 # Local config/secrets
 config*.yml

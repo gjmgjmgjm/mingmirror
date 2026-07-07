@@ -26,7 +26,7 @@ def client(tmp_path: Path):
 def test_root_redirects_to_frontend(client):
     resp = client.get("/", follow_redirects=False)
     assert resp.status_code == 307
-    assert resp.headers["location"] == "/app/index.html"
+    assert resp.headers["location"] == "/app/"
 
 
 def test_frontend_index_served(client):
