@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from auth import CookieManager
 from config import ConfigLoader
@@ -32,6 +33,22 @@ from server.jobs import JobManager, JobStatus
 from storage import FileManager
 from utils.logger import setup_logger
 from utils.validators import is_short_url, normalize_short_url
+
+
+class _SPAStaticFiles(StaticFiles):
+    """StaticFiles subclass that falls back to index.html for SPA routing."""
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+        if response.status_code == 404:
+            return await super().get_response("index.html", scope)
+        return response
+
 
 # Whitelisted proxy schemes for the REST proxy test endpoint.
 _PROXY_ALLOWED_SCHEMES = {"http", "https", "socks5", "socks5h"}
@@ -68,6 +85,10 @@ class JobResponse(BaseModel):
 class BaziAnalyzeRequest(BaseModel):
     bazi: str
     question: str = ""
+    gender: str = "male"
+    birth_date: str = ""
+    birth_time: str = "00:00"
+    calendar_type: str = "solar"
     top_k: int = 3
 
 
@@ -469,6 +490,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
         knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
         embedding_cache = ai_cfg.get("embedding_cache")
         embedding_cache_path = Path(embedding_cache) if embedding_cache else None
+        knowledge_embedding_cache = ai_cfg.get("knowledge_embedding_cache")
+        knowledge_embedding_cache_path = Path(knowledge_embedding_cache) if knowledge_embedding_cache else None
 
         def _to_paths(key: str) -> List[Path]:
             values = ai_cfg.get(key) or []
@@ -479,11 +502,16 @@ def build_app(config: ConfigLoader) -> FastAPI:
         result = await analyze_bazi(
             req.bazi.strip(),
             question=req.question,
+            gender=req.gender,
+            birth_date=req.birth_date,
+            birth_time=req.birth_time,
+            calendar_type=req.calendar_type,
             cases_path=cases_path,
             knowledge_base_path=knowledge_path,
             extra_cases_paths=_to_paths("extra_cases_paths"),
             extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
             embedding_cache_path=embedding_cache_path,
+            knowledge_embedding_cache_path=knowledge_embedding_cache_path,
             top_k=min(max(req.top_k, 1), 10),
             api_key=ai_cfg.get("api_key") or None,
             base_url=ai_cfg.get("base_url") or None,
@@ -532,6 +560,14 @@ def build_app(config: ConfigLoader) -> FastAPI:
         ai_cfg = config.get("bazi_ai") or {}
         knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
 
+        def _to_paths(key: str) -> List[Path]:
+            values = ai_cfg.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            return [Path(v) for v in values if v]
+
+        embedding_cache = ai_cfg.get("embedding_cache")
+        knowledge_embedding_cache = ai_cfg.get("knowledge_embedding_cache")
         result = await analyze_yearly(
             req.bazi.strip(),
             gender=req.gender,
@@ -543,6 +579,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
             base_url=ai_cfg.get("base_url") or None,
             model=ai_cfg.get("model") or None,
             knowledge_base_path=knowledge_path,
+            extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
+            cases_path=Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl")),
+            extra_cases_paths=_to_paths("extra_cases_paths"),
+            embedding_cache_path=Path(embedding_cache) if embedding_cache else None,
+            knowledge_embedding_cache_path=Path(knowledge_embedding_cache) if knowledge_embedding_cache else None,
+            top_k=int(ai_cfg.get("top_k", 3)),
         )
         return BaziYearlyResponse(bazi=req.bazi, mode=req.mode, result=result)
 
@@ -711,6 +753,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
             return await analyze_bazi(
                 chart_info.bazi,
                 question=question,
+                gender=chart_info.gender or "male",
+                birth_date=getattr(chart_info, "birth_datetime", "") or "",
                 cases_path=cases_path,
                 knowledge_base_path=knowledge_path,
                 extra_cases_paths=_to_paths("extra_cases_paths"),
@@ -1009,11 +1053,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
     frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
     static_dir = web_dist_dir if web_dist_dir.is_dir() else frontend_dir
     if static_dir.is_dir():
-        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+        app.mount("/app", _SPAStaticFiles(directory=str(static_dir), html=True), name="frontend")
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
-        return RedirectResponse(url="/app/index.html")
+        return RedirectResponse(url="/app/")
 
     return app
 
