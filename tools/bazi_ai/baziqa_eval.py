@@ -169,7 +169,10 @@ def _build_baseline_prompt(question: str, options: List[str]) -> str:
 
 {_format_options(options)}
 
-请只回答选项字母（A/B/C/D），不要输出任何解释。"""
+请先简要说明推理依据（50字以内），然后给出答案。
+输出格式：
+推理：<依据>
+答案：<A/B/C/D>"""
 
 
 async def _build_enhanced_context(
@@ -251,7 +254,10 @@ async def _build_enhanced_prompt(
 
 {_format_options(options)}
 
-请只回答选项字母（A/B/C/D），不要输出任何解释。"""
+请先结合命局信息给出简要推理（100字以内），然后从选项中选择最可能的一个。
+输出格式：
+推理：<你的推理>
+答案：<A/B/C/D>"""
 
 
 async def evaluate_question(
