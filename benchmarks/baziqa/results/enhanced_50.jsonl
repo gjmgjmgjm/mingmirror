@@ -1,0 +1,50 @@
+{"question_id": "P025-Q1", "question": "命主财运?", "bazi": "甲午 丁卯 癸酉 庚申", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P025-Q2", "question": "命主父亲于哪年去世?", "bazi": "甲午 丁卯 癸酉 庚申", "answer": "A", "predicted": "A", "correct": true, "raw": "A", "mode": "enhanced"}
+{"question_id": "P025-Q3", "question": "命主哪年到香港?", "bazi": "甲午 丁卯 癸酉 庚申", "answer": "C", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P025-Q4", "question": "虚龄35至44甲戌大运期间，最困扰命主的疾病为?", "bazi": "甲午 丁卯 癸酉 庚申", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P025-Q5", "question": "虚龄35至44甲戌大运期间，其子女运？", "bazi": "甲午 丁卯 癸酉 庚申", "answer": "B", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P026-Q6", "question": "命主目前的职业是什么？", "bazi": "癸亥 壬戌 庚辰 辛巳", "answer": "C", "predicted": "", "correct": false, "raw": "", "mode": "enhanced", "error": "ClientResponseError: 404, message='Not Found', url='https://apihub.agnes-ai.com/v1/chat/completions'"}
+{"question_id": "P026-Q7", "question": "命主已经离婚，第二婚是哪一年？", "bazi": "癸亥 壬戌 庚辰 辛巳", "answer": "D", "predicted": "", "correct": false, "raw": "", "mode": "enhanced", "error": "ClientResponseError: 404, message='Not Found', url='https://apihub.agnes-ai.com/v1/chat/completions'"}
+{"question_id": "P026-Q8", "question": "命主目前有一个孩子，那年出生？", "bazi": "癸亥 壬戌 庚辰 辛巳", "answer": "D", "predicted": "D", "correct": true, "raw": "D", "mode": "enhanced"}
+{"question_id": "P026-Q9", "question": "命主在2011年发生了一件事情？", "bazi": "癸亥 壬戌 庚辰 辛巳", "answer": "B", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P026-Q10", "question": "命主的性格外表怎样？", "bazi": "癸亥 壬戌 庚辰 辛巳", "answer": "A", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P027-Q11", "question": "命主读书及学历情况如何？", "bazi": "甲子 丙子 戊子 辛酉", "answer": "C", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P027-Q12", "question": "命主毕业后，从事那类型工作？", "bazi": "甲子 丙子 戊子 辛酉", "answer": "A", "predicted": "A", "correct": true, "raw": "A", "mode": "enhanced"}
+{"question_id": "P027-Q13", "question": "命主感情、婚姻情况如何？", "bazi": "甲子 丙子 戊子 辛酉", "answer": "C", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P027-Q14", "question": "命主于哪一年有家宅搬迁？", "bazi": "甲子 丙子 戊子 辛酉", "answer": "D", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P027-Q15", "question": "命主2018年发生了什么事情及结果？", "bazi": "甲子 丙子 戊子 辛酉", "answer": "A", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P028-Q16", "question": "这人个性特征如何?", "bazi": "丁巳 丙午 甲子 辛未", "answer": "B", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P028-Q17", "question": "这人曾经做过啥工作?", "bazi": "丁巳 丙午 甲子 辛未", "answer": "A", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P028-Q18", "question": "2017年起步入壬寅大运，工作有何变化？", "bazi": "丁巳 丙午 甲子 辛未", "answer": "D", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P028-Q19", "question": "这人那一年结婚，几个小孩？", "bazi": "丁巳 丙午 甲子 辛未", "answer": "D", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P028-Q20", "question": "这人健康如何？", "bazi": "丁巳 丙午 甲子 辛未", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P029-Q21", "question": "1970年出生的游先生，他的婚姻状况与学历高低如何？", "bazi": "庚戌 癸未 甲辰 戊辰", "answer": "D", "predicted": "A", "correct": false, "raw": "A", "mode": "enhanced"}
+{"question_id": "P029-Q22", "question": "游先生在45–54岁癸未大限（2014–现在）工作运如何？", "bazi": "庚戌 癸未 甲辰 戊辰", "answer": "D", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P029-Q23", "question": "游先生的个性智慧如何？以及52岁（2021）父母状况？", "bazi": "庚戌 癸未 甲辰 戊辰", "answer": "A", "predicted": "", "correct": false, "raw": "", "mode": "enhanced", "error": "ClientResponseError: 404, message='Not Found', url='https://apihub.agnes-ai.com/v1/chat/completions'"}
+{"question_id": "P029-Q24", "question": "游先生在2020年发生的事项，哪项正确？", "bazi": "庚戌 癸未 甲辰 戊辰", "answer": "B", "predicted": "B", "correct": true, "raw": "B", "mode": "enhanced"}
+{"question_id": "P029-Q25", "question": "游先生52岁目前健康状况如何？", "bazi": "庚戌 癸未 甲辰 戊辰", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P030-Q26", "question": "命主在2018年开始学习哪一种技能？", "bazi": "甲寅 丁丑 癸丑 丁巳", "answer": "D", "predicted": "D", "correct": true, "raw": "D", "mode": "enhanced"}
+{"question_id": "P030-Q27", "question": "命主第一次与男生交往在那一年？", "bazi": "甲寅 丁丑 癸丑 丁巳", "answer": "D", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P030-Q28", "question": "命主在那一年结婚？", "bazi": "甲寅 丁丑 癸丑 丁巳", "answer": "D", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P030-Q29", "question": "命主现时职业是什么？", "bazi": "甲寅 丁丑 癸丑 丁巳", "answer": "A", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P030-Q30", "question": "命主2014年运势如何？", "bazi": "甲寅 丁丑 癸丑 丁巳", "answer": "A", "predicted": "A", "correct": true, "raw": "A", "mode": "enhanced"}
+{"question_id": "P031-Q31", "question": "命主从1975年至2020年（丙辰至庚申大运）的职业是什么？", "bazi": "壬辰 癸丑 戊寅 乙卯", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P031-Q32", "question": "命主在何一年得到子女？", "bazi": "壬辰 癸丑 戊寅 乙卯", "answer": "B", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P031-Q33", "question": "命主在哪一年闹上官非并被警察扣留？", "bazi": "壬辰 癸丑 戊寅 乙卯", "answer": "A", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P031-Q34", "question": "命主是因为什么事闹上官非？", "bazi": "壬辰 癸丑 戊寅 乙卯", "answer": "A", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P031-Q35", "question": "命主在2016年发生何事？", "bazi": "壬辰 癸丑 戊寅 乙卯", "answer": "D", "predicted": "B", "correct": false, "raw": "B", "mode": "enhanced"}
+{"question_id": "P033-Q36", "question": "以下哪项描述是命主截至 2018 年的事业状态？", "bazi": "辛亥 丁酉 戊戌 丁巳", "answer": "A", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P033-Q37", "question": "以下哪项是命主于 2016 及 2017 年的经历？", "bazi": "辛亥 丁酉 戊戌 丁巳", "answer": "B", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P033-Q38", "question": "以下哪项描述符合命主于 2019 年的状况？", "bazi": "辛亥 丁酉 戊戌 丁巳", "answer": "D", "predicted": "D", "correct": true, "raw": "D", "mode": "enhanced"}
+{"question_id": "P033-Q39", "question": "截至2017年9月，哪项符合命主感情与婚姻状况？", "bazi": "丁未 戊申 癸亥 庚申", "answer": "D", "predicted": "", "correct": false, "raw": "", "mode": "enhanced", "error": "TimeoutError: "}
+{"question_id": "P033-Q40", "question": "截至2017年9月，哪项符合命主财政与事业？", "bazi": "丁未 戊申 癸亥 庚申", "answer": "C", "predicted": "A", "correct": false, "raw": "A", "mode": "enhanced"}
+{"question_id": "P017-Q1", "question": "此命1996年发生何事？", "bazi": "甲寅 戊辰 己亥 壬申", "answer": "A", "predicted": "", "correct": false, "raw": "", "mode": "enhanced", "error": "TimeoutError: "}
+{"question_id": "P017-Q2", "question": "此命何年结婚？", "bazi": "甲寅 戊辰 己亥 壬申", "answer": "C", "predicted": "D", "correct": false, "raw": "D", "mode": "enhanced"}
+{"question_id": "P017-Q3", "question": "此命2008年发生何事？", "bazi": "甲寅 戊辰 己亥 壬申", "answer": "C", "predicted": "C", "correct": true, "raw": "C", "mode": "enhanced"}
+{"question_id": "P017-Q4", "question": "此命父亲是哪一年仙逝？", "bazi": "甲寅 戊辰 己亥 壬申", "answer": "C", "predicted": "A", "correct": false, "raw": "A", "mode": "enhanced"}
+{"question_id": "P017-Q5", "question": "此命2020年发生何事?", "bazi": "甲寅 戊辰 己亥 壬申", "answer": "B", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P018-Q6", "question": "此命的学历如何？", "bazi": "辛酉 癸巳 甲辰 乙丑", "answer": "B", "predicted": "B", "correct": true, "raw": "B", "mode": "enhanced"}
+{"question_id": "P018-Q7", "question": "这命何时候结婚？", "bazi": "辛酉 癸巳 甲辰 乙丑", "answer": "B", "predicted": "B", "correct": true, "raw": "B", "mode": "enhanced"}
+{"question_id": "P018-Q8", "question": "此命有一名女儿于何年出生？", "bazi": "辛酉 癸巳 甲辰 乙丑", "answer": "A", "predicted": "C", "correct": false, "raw": "C", "mode": "enhanced"}
+{"question_id": "P018-Q9", "question": "身材？", "bazi": "辛酉 癸巳 甲辰 乙丑", "answer": "D", "predicted": "A", "correct": false, "raw": "A", "mode": "enhanced"}
+{"question_id": "P018-Q10", "question": "父母情况？", "bazi": "辛酉 癸巳 甲辰 乙丑", "answer": "B", "predicted": "B", "correct": true, "raw": "B", "mode": "enhanced"}

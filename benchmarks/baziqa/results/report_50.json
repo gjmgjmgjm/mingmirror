@@ -1,0 +1,26 @@
+{
+  "dataset": "BaziQA Contest8",
+  "sample_size": 50,
+  "model": "agnes-2.0-flash",
+  "api_base": "https://apihub.agnes-ai.com/v1",
+  "enhanced": {
+    "total": 50,
+    "correct": 16,
+    "errors": 5,
+    "unanswered": 0,
+    "accuracy": 0.32
+  },
+  "baseline": {
+    "total": 50,
+    "correct": 15,
+    "errors": 12,
+    "unanswered": 1,
+    "accuracy": 0.3
+  },
+  "head_to_head": {
+    "common_questions": 50,
+    "enhanced_wins": 8,
+    "baseline_wins": 7,
+    "ties": 35
+  }
+}
