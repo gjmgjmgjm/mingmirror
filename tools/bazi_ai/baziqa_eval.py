@@ -276,42 +276,47 @@ async def evaluate_question(
     options = question.get("options", [])
     answer = question.get("answer", "")
 
-    if mock_answer is not None:
-        raw = mock_answer
-    elif mode == "baseline":
-        system_prompt = "你是一位精通中国传统八字命理的命理师。"
-        user_prompt = _build_baseline_prompt(qtext, options)
-        raw = await _call_llm(
-            system_prompt,
-            user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-        )
-    else:
-        context = await _build_enhanced_context(
-            bazi,
-            qtext,
-            gender=gender,
-            birth_date=birth_date,
-            birth_time=birth_time,
-            cases_path=cases_path,
-            knowledge_base_path=knowledge_base_path,
-            embedding_cache_path=embedding_cache_path,
-            knowledge_embedding_cache_path=knowledge_embedding_cache_path,
-        )
-        system_prompt = "你是一位精通中国传统八字命理的命理师。"
-        user_prompt = await _build_enhanced_prompt(bazi, qtext, options, context)
-        raw = await _call_llm(
-            system_prompt,
-            user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-        )
+    raw = ""
+    error = None
+    try:
+        if mock_answer is not None:
+            raw = mock_answer
+        elif mode == "baseline":
+            system_prompt = "你是一位精通中国传统八字命理的命理师。"
+            user_prompt = _build_baseline_prompt(qtext, options)
+            raw = await _call_llm(
+                system_prompt,
+                user_prompt,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+            )
+        else:
+            context = await _build_enhanced_context(
+                bazi,
+                qtext,
+                gender=gender,
+                birth_date=birth_date,
+                birth_time=birth_time,
+                cases_path=cases_path,
+                knowledge_base_path=knowledge_base_path,
+                embedding_cache_path=embedding_cache_path,
+                knowledge_embedding_cache_path=knowledge_embedding_cache_path,
+            )
+            system_prompt = "你是一位精通中国传统八字命理的命理师。"
+            user_prompt = await _build_enhanced_prompt(bazi, qtext, options, context)
+            raw = await _call_llm(
+                system_prompt,
+                user_prompt,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+            )
+    except Exception as exc:  # pragma: no cover - safety net for live API
+        error = f"{type(exc).__name__}: {exc}"
 
     predicted = _extract_answer(raw) or ""
-    return {
+    result: Dict[str, Any] = {
         "question_id": qid,
         "question": qtext,
         "bazi": bazi,
@@ -321,6 +326,9 @@ async def evaluate_question(
         "raw": raw,
         "mode": mode,
     }
+    if error:
+        result["error"] = error
+    return result
 
 
 def _birth_date_time(person: Dict[str, Any]) -> Tuple[str, str]:
