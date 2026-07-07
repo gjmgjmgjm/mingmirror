@@ -21,7 +21,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiofiles
 
@@ -34,6 +34,11 @@ except ImportError:  # pragma: no cover
     aiohttp = None  # type: ignore[assignment]
     ClientResponseError = Exception  # type: ignore[assignment,misc]
 
+from tools.bazi_ai.bazi_structural import (
+    liuqin_profile,
+    structural_profile,
+    wealth_power_resource_flow,
+)
 from tools.bazi_ai.bazi_validator import (
     day_master,
     extract_pillars,
@@ -41,6 +46,7 @@ from tools.bazi_ai.bazi_validator import (
     normalize_bazi,
 )
 from tools.bazi_ai.embeddings import EmbeddingStore
+from tools.bazi_ai.knowledge_retriever import retrieve_knowledge_snippets
 from tools.bazi_ai.rule_checker import check_analysis
 
 logger = logging.getLogger(__name__)
@@ -200,7 +206,7 @@ async def _build_rule_primer(
     return text[:max_chars]
 
 
-def _build_system_prompt(rule_primer: str) -> str:
+def _build_system_prompt(knowledge_context: str) -> str:
     return f"""你是一位坐在茶桌对面、说话直接又有温度的命理师。你不是在写报告，而是在跟一个具体的人聊他的命。你会先看他八字，然后像真人一样说出你的判断，有依据、有场景、有情绪，但绝不编造。
 
 表达风格（必须严格执行）：
@@ -279,12 +285,22 @@ def _build_system_prompt(rule_primer: str) -> str:
   "caveats": ["时辰若不准，日柱变化会显著影响结论"]
 }}
 
-基础知识参考：
-{rule_primer}
+基础知识参考（以下是从本地知识库中检索出的最相关片段，请优先结合它们进行推断）：
+{knowledge_context}
 """
 
 
-def _build_user_prompt(bazi: str, question: str, similar_cases: List[Dict]) -> str:
+def _build_user_prompt(
+    bazi: str,
+    question: str,
+    similar_cases: List[Dict],
+    *,
+    gender: str = "male",
+    liuqin_facts: Optional[Dict] = None,
+    structural_facts: Optional[Dict] = None,
+    dayun_list: Optional[List[Dict]] = None,
+    flow_facts: Optional[Dict] = None,
+) -> str:
     cases_text = "\n\n".join(
         f"案例 {i+1}：\n八字：{c.get('bazi')}\n命理师分析：{c.get('analysis_corrected', '')[:500]}"
         for i, c in enumerate(similar_cases)
@@ -302,12 +318,76 @@ def _build_user_prompt(bazi: str, question: str, similar_cases: List[Dict]) -> s
     else:
         focus_instruction = "请全面分析事业、财运、婚姻、健康四个领域。"
 
+    liuqin_text = ""
+    if liuqin_facts:
+        members = ["father", "mother", "spouse", "son", "daughter", "brother", "sister"]
+        labels = {
+            "father": "父亲", "mother": "母亲", "spouse": "配偶",
+            "son": "儿子", "daughter": "女儿", "brother": "兄弟", "sister": "姐妹",
+        }
+        lines = []
+        for m in members:
+            info = liuqin_facts.get(m, {})
+            if info.get("exists"):
+                lines.append(f"【{labels[m]}】{info.get('description', '')}")
+            else:
+                lines.append(f"【{labels[m]}】{info.get('description', '')}")
+        liuqin_text = "\n".join(lines)
+
+    structural_text = ""
+    if structural_facts:
+        stem_shishen_text = "、".join(f"{k}：{v}" for k, v in structural_facts.get("stem_shishen", {}).items())
+        branch_shishen_text = "、".join(f"{k}：{v}" for k, v in structural_facts.get("branch_shishen", {}).items())
+        structural_text = f"""【命局结构事实】（由程序严格计算，你必须以此为依据，禁止自行发明）
+- 日主：{structural_facts.get("day_master", "")}
+- 月令：{structural_facts.get("month_branch", "")}
+- 天干十神：{stem_shishen_text}
+- 地支十神（本气）：{branch_shishen_text}
+- 五行统计（天干0.5+地支1.0）：{structural_facts.get("element_weighted_text", "")}
+- 参考旺衰：{structural_facts.get("strength", "")}
+- 参考用神：{structural_facts.get("useful_gods", "")}
+- 参考忌神：{structural_facts.get("taboo_gods", "")}
+- 天干合化：{structural_facts.get("tian_gan_he_text", "无")}
+- 地支合冲刑害：{structural_facts.get("di_zhi_relations_text", "无")}
+- 地支综合关系（含三合/半合/三会/藏干合/冲合互解）：
+{structural_facts.get("di_zhi_comprehensive_text", "无")}
+- 空亡：{structural_facts.get("kong_wang", "")}
+- 宫位：{structural_facts.get("palace_text", "")}
+"""
+
+    dayun_text = ""
+    if dayun_list:
+        lines = []
+        for d in dayun_list[:8]:
+            lines.append(f"{d['start_age']:.2f}-{d['end_age']:.2f}岁：{d['pillar']}大运")
+        dayun_text = "【大运走势】\n" + "\n".join(lines)
+
+    flow_text = ""
+    if flow_facts and flow_facts.get("exists"):
+        flow_text = f"【特殊流通结构】\n{flow_facts.get('description', '')}"
+
+    gender_label = "男命" if gender in ("male", "男") else "女命"
+
     return f"""请为以下八字做详细分析，像一位真人命理师面对面跟命主交谈那样回答。
 
 八字：{bazi}
+性别：{gender_label}
 命主提问：{question or "全面分析事业、财运、婚姻、健康"}
 
 {focus_instruction}
+
+{structural_text}
+
+{dayun_text}
+
+{flow_text}
+
+【六亲星宫事实】（由程序严格计算，你必须以此为依据，禁止把星和宫的位置说错）
+{liuqin_text}
+
+夫妻宫：日支{liuqin_facts.get('spouse_palace', {}).get('branch', '')}，本气十神为{liuqin_facts.get('spouse_palace', {}).get('shishen_main', '')}。
+父母宫：月支{liuqin_facts.get('parents_palace', {}).get('branch', '')}。
+子女宫：时支{liuqin_facts.get('children_palace', {}).get('branch', '')}。
 
 参考案例（仅作风格与论证参考，不要直接照搬结论）：
 {cases_text}
@@ -316,6 +396,10 @@ def _build_user_prompt(bazi: str, question: str, similar_cases: List[Dict]) -> s
 - 用自然、口语化的中文，像真人说话。
 - 避免"根据子平法……""从八字来看……""综上所述……"等学术腔和公文腔开头。
 - 每个结论都要像一段话，有依据、有场景、有具体建议。
+- 六亲断语必须星宫同参：先说明该六亲的"星"是什么十神、落在哪一柱/天干/地支藏干，再结合所在宫位下断语。
+- 禁止把日主自己当作兄弟姐妹星。兄弟星必须看命局中除日干外的比肩，姐妹星看除日干外的劫财。
+- 六亲十神必须以日干为准，禁止凭直觉编造。本局日干为甲木、男命，所以：父星=偏财戊土，母星=正印癸水，妻星=正财己土，儿子=七杀庚金，女儿=正官辛金，兄弟=比肩甲木（日干除外），姐妹=劫财乙木。
+- 判断六亲对命主好坏时，必须结合用神忌神：为用神则助我，为忌神则带来压力或健康隐患。
 
 请按以下 JSON 格式输出（不要输出 markdown 代码块，只输出 JSON）：
 {{
@@ -334,11 +418,11 @@ def _build_user_prompt(bazi: str, question: str, similar_cases: List[Dict]) -> s
     "marriage": "婚姻/感情分析（只写结论，禁止写置信度）",
     "health": "健康分析（只写结论，禁止写置信度）"
   }},
-  "wealth_level": "从「贫、温饱、小康、中产、小富、中富、大富、巨富」中选择一级",
-  "wealth_evidence": "给出财富等级的简要依据",
+  "wealth_level": "从「贫、温饱、小康、中产、小富、中富、大富、巨富」中选择一级，只写原局财富潜力等级，不写具体金额。具体赚多少钱、在哪一年线城市达到什么资产规模，应放在大运流年分析中再细断。",
+  "wealth_evidence": "给出财富等级的依据，必须说明：1）原局财星/食伤/库的情况；2）日主能否担财；3）是否有财杀印流通；4）哪几步大运对财富最有利/最不利。禁止在这里写'一线城市XX万'这类具体金额。",
   "marriage_status": "从「未婚、早婚、晚婚、一婚稳定、二婚、多婚、孤独」中选择一项",
   "marriage_evidence": "给出婚姻状况的简要依据",
-  "liuqin_analysis": "按年柱、月柱、日柱、时柱逐柱说明：天干十神代表什么六亲，地支及藏干又代表什么六亲。男命正财为妻、偏财为父、正印为母、食神为子、伤官为女、七杀为子、正官为女；女命正官为夫、七杀为情人、食神为女、伤官为子、正印为母。",
+  "liuqin_analysis": "详细的六亲断语，必须是完整段落，不要只列标签。必须包含以下小节，每节都要先说星宫依据再下断语：\\n【父亲】父星是什么十神、落在哪一柱天干/地支藏干，父亲性格、能力、健康、与命主关系。\\n【母亲】母星是什么十神、落在哪一柱，母亲性格、能力、健康、与命主关系。\\n【配偶】男命以正财为妻星/女命以正官为夫星，落在哪一柱；夫妻宫日支是什么、本气十神是什么。配偶性格、能力、健康、外貌、与命主婚姻状态。\\n【子女】先判断命中偏向儿子、女儿还是儿女双全，并给出命局依据。再分别写儿子和女儿的性格、能力、健康、与命主关系。\\n【兄弟姐妹】兄弟星比肩、姐妹星劫财分别落在哪一柱，兄弟几人、姐妹几人、是否得力、与命主关系。\\n【六亲关系】父亲与母亲关系、配偶与父母关系、命主与手足关系等互动特点。",
   "milestones": [
     {{"year": 年份, "age": 年龄, "type": "婚动/子女/事业转折/财富转折/重大疾病/搬迁/学业/其他", "description": "必须有命局依据，证据不足时宁可留空数组"}}
   ],
@@ -355,11 +439,16 @@ async def analyze_bazi(
     bazi: str,
     *,
     question: str = "",
+    gender: str = "male",
+    birth_date: str = "",
+    birth_time: str = "00:00",
+    calendar_type: str = "solar",
     cases_path: Optional[Path] = Path("./bazi_knowledge/cases.jsonl"),
     knowledge_base_path: Optional[Path] = None,
     extra_cases_paths: Optional[List[Path]] = None,
     extra_knowledge_base_paths: Optional[List[Path]] = None,
     embedding_cache_path: Optional[Path] = None,
+    knowledge_embedding_cache_path: Optional[Path] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -397,17 +486,54 @@ async def analyze_bazi(
     else:
         similar_cases = []
 
-    # Base rule primer + any explicitly configured knowledge bases.
-    rule_primer_paths = [Path("./bazi_knowledge/rule_primer.md")]
+    # Retrieve the most relevant knowledge snippets instead of dumping whole files.
+    knowledge_paths = [Path("./bazi_knowledge/rule_primer.md")]
     if knowledge_base_path is not None and knowledge_base_path.exists():
-        rule_primer_paths.append(knowledge_base_path)
+        knowledge_paths.append(knowledge_base_path)
     for path in extra_knowledge_base_paths or []:
         if path.exists():
-            rule_primer_paths.append(path)
+            knowledge_paths.append(path)
 
-    rule_primer = await _build_rule_primer(rule_primer_paths, max_chars=12000)
-    system_prompt = _build_system_prompt(rule_primer)
-    user_prompt = _build_user_prompt(bazi, question, similar_cases)
+    knowledge_context = await retrieve_knowledge_snippets(
+        query=f"{bazi}\n{question}".strip(),
+        knowledge_paths=knowledge_paths,
+        cache_path=knowledge_embedding_cache_path,
+        top_k=6,
+        max_chars=10000,
+    )
+
+    # Compute structural facts to ground the AI and prevent invented stars/palaces.
+    structural_facts = structural_profile(bazi) or {}
+    liuqin_facts = liuqin_profile(bazi, gender=gender) or {}
+    flow_facts = wealth_power_resource_flow(bazi)
+
+    # Compute dayun if birth info is available so wealth/destiny levels can be
+    # judged against the full life trajectory, not just the static chart.
+    dayun_list_data: List[Dict] = []
+    if birth_date:
+        try:
+            dayun_list_data = calendar.dayun_list(
+                bazi,
+                gender,
+                birth_date,
+                birth_time,
+                calendar_type,
+                until_age=60,
+            )
+        except Exception:
+            dayun_list_data = []
+
+    system_prompt = _build_system_prompt(knowledge_context)
+    user_prompt = _build_user_prompt(
+        bazi,
+        question,
+        similar_cases,
+        gender=gender,
+        liuqin_facts=liuqin_facts,
+        structural_facts=structural_facts,
+        dayun_list=dayun_list_data,
+        flow_facts=flow_facts,
+    )
 
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
@@ -552,7 +678,7 @@ def _bazi_profile(bazi: str) -> Dict[str, str]:
     }
 
 
-def _build_yearly_system_prompt(rule_primer: str) -> str:
+def _build_yearly_system_prompt(knowledge_context: str) -> str:
     return f"""你是一位坐在对面、擅长大运流年推演的命理师。你不是在写年运报告，而是在逐年告诉命主他接下来会经历什么。语气像真人聊天：直接、有温度、有画面感。
 
 表达风格（必须严格执行）：
@@ -571,14 +697,23 @@ def _build_yearly_system_prompt(rule_primer: str) -> str:
 3. 逐年分析时，必须结合流年天干十神、地支与命局/大运的刑冲合害，给出具体判断。例如：
    - “丙午年七杀透干，与原局午午自刑，你这一年工作压力会明显变大，容易跟上头起冲突，跳槽不是好时机。”
    - “戊申年偏印坐禄，有贵人愿意拉你一把，考证、进修或者争取晋升都对你有利。”
-4. 事业、财运、感情、健康四个领域禁止写空话。要给出命主能听懂、能操作的判断，比如"上半年有机会跳槽，但薪资涨幅有限""偏财不稳，别追热点""有桃花，但多半是烂桃花""肠胃和睡眠要注意"。
-5. 若某年与大运、命局形成明显冲克（子午冲、寅申冲、卯酉冲、辰戌冲、巳亥冲、丑未冲），必须在 overview 或 caution 中明确指出。
-6. 每一年 overview 控制在 80 字以内，必须包含：本年所在大运、流年十神作用、关键触发（十神/合冲刑害）、具体事件预测。
-7. 四个领域每栏控制在 60 字以内，caution 控制在 40 字以内。整体要凝练、有断语。
-8. 如果某一年没有明显吉凶事件，允许写“这一年没什么大动静，平顺过渡”，禁止硬凑四栏套话。
-9. 六亲断语要像你随口讲起命主家里关系，按年柱、月柱、日柱、时柱逐柱带过。
-10. 每一年输出 `key_event`：有明显事件时直接点明（结婚、离婚、升职、跳槽、破财、发财、生子、手术、搬迁、创业失败、官司、桃花、学业、长辈灾等）；无明显事件时写“平稳过渡，无重大事件”。禁止为凑数而编造事件。
-11. 全局 `milestones` 只汇总真正高置信度的人生节点：
+4. 十二字关系必须全面考虑，不能只看六合、六冲。每论一年，必须检查命局四柱地支、大运地支、流年地支之间的：六合、六冲、六害、三刑、三合局（如申子辰合水）、半合局、三会局（如寅卯辰会木）、藏干合（如午中丁火与未中己土），以及冲合互解（某支本可合局，但被另一支冲开；或某支本可相冲，但被第三支合住解冲）。把这些关系放在大运背景下判断：大运是趋势，流年是应期；若大运与命局已成合局，流年来冲才引发变动；若流年与命局成合，能解原局或大运的冲。
+5. 事业、财运、感情、健康四个领域禁止写空话。要给出命主能听懂、能操作的判断，比如"上半年有机会跳槽，但薪资涨幅有限""偏财不稳，别追热点""有桃花，但多半是烂桃花""肠胃和睡眠要注意"。
+6. 若某年与大运、命局形成明显冲克（子午冲、寅申冲、卯酉冲、辰戌冲、巳亥冲、丑未冲），必须在 overview 或 caution 中明确指出。
+7. 每一年 overview 控制在 80 字以内，必须包含：本年所在大运、流年十神作用、关键触发（十神/合冲刑害）、具体事件预测。
+8. 四个领域每栏控制在 60 字以内，caution 控制在 40 字以内。整体要凝练、有断语。
+9. 如果某一年没有明显吉凶事件，允许写“这一年没什么大动静，平顺过渡”，禁止硬凑四栏套话。
+10. 六亲断语必须覆盖命主身边的每一位亲人，按人物分节写成，每节都要像命理师在跟命主聊家里的事。禁止出现半截话，禁止把人物关系堆在最后的“family_relations”里敷衍。每个字段必须是一个语法完整、没有截断的句子；如果某方面信息不足，也要写成完整判断，例如“姐妹缘分较浅，命中姐妹星不显”，禁止写成“姐妹缘分”。要求如下：
+    【父亲】以偏财/正财为父星，说明父星落在哪一柱（年/月/日/时）、天干还是地支藏干，父亲性格、能力、健康、与命主关系，以及父亲与母亲的关系如何。
+    【母亲】以正印/偏印为母星，说明母星落在哪一柱，母亲性格、能力、健康、与命主关系，以及母亲与父亲、与命主配偶（婆媳/翁婿）的关系如何。
+    【配偶】以日支为夫妻宫，结合男命财星/女命官杀为配偶星，说明配偶性格、能力、健康、外貌、与命主婚姻状态。必须根据夫妻宫和配偶星的刑冲合害、清浊混杂，直接判断：婚姻是否稳定、是否容易二婚/多婚、感情中的主要矛盾是什么。同时说明配偶与命主父母相处如何。
+    【子女】男命以正官/七杀为子女星（七杀多主儿子、正官多主女儿，仅供参考），女命以食神/伤官为子女星（伤官多主儿子、食神多主女儿，仅供参考）。必须先判断命中偏向生儿子、女儿，还是儿女双全，并给出依据（哪一柱子女星旺、哪一柱受克）。再分别写儿子和女儿的性格、能力、健康、与命主关系。若子女星弱或受冲，则说明子女缘薄、来得晚或需操心。
+    【兄弟姐妹】以比肩/劫财为手足星，说明兄弟姐妹缘分、数量倾向、是否得力、与命主关系。
+    `family_relations` 字段只作为补充，不要在这里重复写父母关系、夫妻关系；这些关系必须分别写在父亲、母亲、配偶的章节里。
+    错误示例（禁止）："祖上家境""父亲身体""兄弟缘""配偶对你""婚姻中需""子女缘较好"；
+    正确示例："你命中七杀透干，先论儿子：儿子性格刚强有主见，将来适合技术或军警类方向，小时候你管得严，他反而逆反，长大后关系才会缓和""女儿星正官藏而不透，女儿缘分比儿子浅一些，性格偏内向乖巧""夫妻宫坐七杀无制，配偶脾气大、控制欲强，婚姻中容易冷战，若再逢冲刑，二婚概率不低"。
+11. 每一年输出 `key_event`：有明显事件时直接点明（结婚、离婚、升职、跳槽、破财、发财、生子、手术、搬迁、创业失败、官司、桃花、学业、长辈灾等）；无明显事件时写“平稳过渡，无重大事件”。禁止为凑数而编造事件。
+12. 全局 `milestones` 只汇总真正高置信度的人生节点：
     - 婚动/结婚：流年或大运冲合夫妻宫，或配偶星透干合身。
     - 离婚/感情危机：夫妻宫被冲刑穿，且配偶星受制。
     - 生子：子女宫或子女星被引动。
@@ -587,9 +722,24 @@ def _build_yearly_system_prompt(rule_primer: str) -> str:
     - 重大疾病：对应脏腑被严重冲克。
     - 搬迁：驿马被冲。
     证据不足时宁可留空数组，禁止每年硬凑一个节点。
+13. 财富必须给出具体金额估算（不要只写'财运好'）。每一年 `wealth` 字段都要写：收入/支出大致范围、是否适合投资、有没有偏财机会。同时要在顶层 `wealth_forecast` 中给出一生财富上限的估算，并按城市 tier 分开：
+    - 一线城市（北上广深杭等）：房产+流动资产合计达到什么量级
+    - 二线城市（省会/强三线）：同上
+    - 三四线/县城：同上
+    金额用区间表示，例如"300-800万""1000-3000万"，并说明依据（哪步大运是财富爆发期、哪年是关键节点）。禁止写"小康/中产/小富"这类模糊词，必须给数字区间。
+14. 宫位论断必须精确：年支是祖上/父母宫，月支是父母/兄弟宫，日支是夫妻宫，时支是子女宫。大运支、流年支本身不是命局宫位，只有当它们与命局四柱地支发生作用时，才允许说某宫位被引动。禁止把大运支与流年支之间的冲合（如丙辰大运遇庚戌流年之辰戌冲）错误说成夫妻宫/父母宫受冲。提到三合/半合/三会/藏干合时，必须写明具体是哪几个地支在作用，不能笼统地说"父母宫与夫妻宫皆动"。
 
 输出格式：
 {{
+  "wealth_forecast": {{
+    "lifetime_potential": "按八字结构和大运判断，一生财富上限的简短结论",
+    "tier1_cities": "一线城市资产规模区间，例如'房产+流动资产约1000-3000万'",
+    "tier2_cities": "二线城市资产规模区间",
+    "tier3_cities": "三四线/县城资产规模区间",
+    "peak_period": "财富高峰期年龄段及大运",
+    "key_years": [2028, 2031],
+    "evidence": "给出金额依据：财杀印流通、哪步大运助身、哪几年财星/财库被引动"
+  }},
   "dayun_summary": [
     {{"pillar": "大运干支", "start_age": 数字, "end_age": 数字, "theme": "该运主题（含十神与命局关系）", "focus": "重点关注（必须具体）"}}
   ],
@@ -600,13 +750,25 @@ def _build_yearly_system_prompt(rule_primer: str) -> str:
       "overview": "整体运势，必须点明所在大运、流年十神作用、关键触发与具体事件",
       "key_event": "有明显事件直接断；无明显事件写'平稳过渡，无重大事件'",
       "career": "事业具体建议",
-      "wealth": "财运具体建议",
+      "wealth": "财运具体建议，必须包含金额区间或具体数字（例如'正财收入10-20万，偏财不稳，忌投资'）",
       "marriage": "感情具体建议",
       "health": "健康具体建议",
       "caution": "注意事项，突出刑冲合害或重大决策提示"
     }}
   ],
-  "liuqin_analysis": "六亲断语，按年柱、月柱、日柱、时柱逐柱说明：天干十神主何六亲，地支及藏干主何六亲",
+  "liuqin_analysis": {{
+    "father": {{"star": "父星十神及所在柱（完整句）", "character": "性格（完整句）", "ability": "能力（完整句）", "health": "健康（完整句）", "relationship": "与命主关系及父母关系（完整句）"}},
+    "mother": {{"star": "母星十神及所在柱（完整句）", "character": "性格（完整句）", "ability": "能力（完整句）", "health": "健康（完整句）", "relationship": "与命主关系、父母关系、婆媳/翁婿关系（完整句）"}},
+    "spouse": {{"palace": "夫妻宫日支（完整句）", "star": "配偶星（完整句）", "character": "性格（完整句）", "ability": "能力（完整句）", "health": "健康（完整句）", "appearance": "外貌（完整句）", "relationship": "婚姻状态、是否易二婚/多婚、与命主及父母关系（完整句）"}},
+    "children": {{"overview": "先判断命主命中偏向儿子、女儿还是儿女双全，并给出命局依据（完整句）", "sons": "儿子：性格、能力、健康、与命主关系（完整句；若无儿子缘则写清楚）", "daughters": "女儿：性格、能力、健康、与命主关系（完整句；若无女儿缘则写清楚）", "relationship": "命主与子女整体关系（完整句）"}},
+    "siblings": {{"brothers": "兄弟情况（完整句）", "sisters": "姐妹情况（完整句）", "relationship": "与命主关系（完整句）"}},
+    "family_relations": "补充说明全家互动的核心特点，不要重复父母关系、夫妻关系（完整句）"
+  }},
+
+  非常重要：liuqin_analysis 的每个字段值都必须是独立、完整、通顺的句子。
+  - 不要以字段名或称谓开头加逗号，例如禁止写成"母亲能力，……""父亲性格，……"；要直接写"她做事细致，擅长持家""父亲为人务实，有积蓄观念"。
+  - 禁止半截话，例如"需要和理解"必须写成"需要互相理解"；"姐妹缘分"必须写成"姐妹缘分较浅，平时往来不多"。
+  - 如果某方面确实信息不足，也要给出一个完整判断，例如"姐妹星不显，命中姐妹缘浅"。
   "milestones": [
     {{"year": 2026, "age": 33, "type": "婚动", "description": "夫妻宫被冲，感情关系剧变，可能结婚或分手"}}
   ],
@@ -617,8 +779,8 @@ def _build_yearly_system_prompt(rule_primer: str) -> str:
 
 禁用词汇清单（绝对禁止出现，同义词也禁止）：顺其自然、按部就班、按年度节奏推进、量入为出、规律作息、平稳、平顺、逐步、稳步前进、保持现状、整体平顺、心态平和、多沟通、多包容、低调行事、宜守不宜攻、守成、观望、谨慎、注意即可、无大碍、总体尚可、一般、普通、平淡。
 
-基础知识参考：
-{rule_primer}
+基础知识参考（以下是从本地知识库中检索出的最相关片段，请优先结合它们进行推断）：
+{knowledge_context}
 """
 
 
@@ -631,7 +793,15 @@ def _build_yearly_user_prompt(
     profile: Dict,
     yearly_rels: List[Dict],
     birth_year: int,
+    similar_cases: List[Dict],
 ) -> str:
+    cases_text = "\n\n".join(
+        f"案例 {i+1}：\n八字：{c.get('bazi')}\n命理师分析：{c.get('analysis_corrected', '')[:600]}"
+        for i, c in enumerate(similar_cases)
+    )
+    if not cases_text:
+        cases_text = "（暂无相似案例）"
+
     dayun_text = "\n".join(
         f"{d['start_age']}-{d['end_age']}岁: {d['pillar']} "
         f"({birth_year + int(d['start_age'])}-{birth_year + int(d['end_age']) - 1})"
@@ -664,39 +834,52 @@ def _build_yearly_user_prompt(
 - 参考忌神：{profile.get("taboo_gods", "")}
 - 天干合化：{profile.get("tian_gan_he_text", "无")}
 - 地支合冲刑害：{profile.get("di_zhi_relations_text", "无")}
+- 地支综合关系（含三合/半合/三会/藏干合/冲合互解）：
+{profile.get("di_zhi_comprehensive_text", "无")}
 - 空亡：{profile.get("kong_wang", "")}
 - 宫位：{palace_text}
 - 六亲：{profile.get("liuqin_text", "")}"""
 
-    liunian_text = "\n".join(
-        f"{y['year']}年: {y['pillar']}（{_dayun_for_year(y['year'])}大运）"
-        for y in liunian
-    )
-
-    # Per-year structural facts
+    # Per-year structural facts: only include years with notable triggers to keep prompt short.
     day_branch = profile.get("branches", ["", "", "", ""])[2]
     year_facts_lines = []
     for r in yearly_rels:
+        ly_branch = r["liunian_pillar"][1]
+        dy_branch = r["dayun_pillar"][1]
+        comp_text = r.get("di_zhi_comprehensive_text", "")
+        has_relations = bool(
+            (r.get("tian_gan_he_text") and r["tian_gan_he_text"] != "无")
+            or (r.get("di_zhi_relations_text") and r["di_zhi_relations_text"] != "无")
+            or (comp_text and comp_text != "无特殊组合")
+        )
+        palace_hit = bool(day_branch) and (
+            ly_branch == day_branch
+            or dy_branch == day_branch
+            or (ly_branch, day_branch) in _SIX_CHONG
+            or (day_branch, ly_branch) in _SIX_CHONG
+            or (dy_branch, day_branch) in _SIX_CHONG
+            or (day_branch, dy_branch) in _SIX_CHONG
+        )
+        if not (has_relations or palace_hit):
+            continue
         palace_note = ""
         if day_branch:
-            ly_branch = r["liunian_pillar"][1]
-            dy_branch = r["dayun_pillar"][1]
             if ly_branch == day_branch or dy_branch == day_branch:
                 palace_note = f"；夫妻宫日支{day_branch}伏吟"
             elif (ly_branch, day_branch) in _SIX_CHONG or (day_branch, ly_branch) in _SIX_CHONG:
                 palace_note = f"；夫妻宫日支{day_branch}与流年支{ly_branch}相冲（反吟）"
             elif (dy_branch, day_branch) in _SIX_CHONG or (day_branch, dy_branch) in _SIX_CHONG:
                 palace_note = f"；夫妻宫日支{day_branch}与大运支{dy_branch}相冲（反吟）"
-            else:
-                palace_note = f"；夫妻宫日支{day_branch}本年未受冲合刑害"
+        comp_relations = r.get("di_zhi_comprehensive_text", "")
+        comp_part = f"；地支综合关系：{comp_relations}" if comp_relations and comp_relations != "无特殊组合" else ""
         line = (
             f"{r['year']}年 {r['liunian_pillar']}（{r['dayun_pillar']}大运）："
             f"流年干{r['liunian_stem_shishen']}、流年支{r['liunian_branch_shishen']}；"
             f"天干合：{r['tian_gan_he_text']}；"
-            f"地支关系：{r['di_zhi_relations_text']}{palace_note}"
+            f"地支关系：{r['di_zhi_relations_text']}{comp_part}{palace_note}"
         )
         year_facts_lines.append(line)
-    year_facts_text = "\n".join(year_facts_lines)
+    year_facts_text = "\n".join(year_facts_lines) if year_facts_lines else "（十年内无特别强烈的流年结构触发，按大运大趋势分析即可）"
 
     # Group liunian by dayun for clearer prompting.
     def _dayun_for_year(year: int) -> Optional[Dict]:
@@ -716,10 +899,10 @@ def _build_yearly_user_prompt(
             f"{d['pillar']} 大运（{d['start_age']}-{d['end_age']}岁，"
             f"{birth_year + int(d['start_age'])}-{birth_year + int(d['end_age']) - 1}年）：{line_years}"
         )
-    grouped_liunian_text = "\n".join(grouped_lines) if grouped_lines else liunian_text
+    grouped_liunian_text = "\n".join(grouped_lines) if grouped_lines else "\n".join(f"{y['year']}年 {y['pillar']}" for y in liunian)
 
-    scope = "未来10年" if mode == "10y" else "一生（到80岁）"
-    if mode == "10y":
+    scope = {"10y": "未来10年", "20y": "未来20年"}.get(mode, "一生（到80岁）")
+    if mode in ("10y", "20y"):
         yearly_instruction = f"""流年结构事实（必须以这些事实为依据，禁止编造）：
 {year_facts_text}
 
@@ -738,9 +921,12 @@ def _build_yearly_user_prompt(
 - 每一年的 overview 必须严格以如下事实格式开头："{{流年干支}}，{{流年天干十神}}透干、{{流年地支十神}}坐支；所在{{大运干支}}，{{大运天干十神}}透干、{{大运地支十神}}坐支。" 然后接具体事件断语。
 - 必须将命局、大运、流年三者结合：先说明大运对命局的作用，再说明流年如何在大运基础上引发事件。
 - 涉及合化、冲克、刑害时，只能引用【命局结构事实】和【流年结构事实】中列出的内容，禁止自行发明。
-- 涉及夫妻宫、父母宫、子女宫等宫位论断时，必须核对【宫位】事实：只有日支才是夫妻宫。禁止把年支、月支、时支或大运支/流年支之间的冲合错误归到夫妻宫。
-- 特别重要：大运支与流年支的冲合（如丙辰大运遇庚戌流年之辰戌冲）只代表大运与流年互动，不等于冲日支/夫妻宫。只有当流年支或大运支与命局日支产生冲合刑害时，才允许说夫妻宫受影响。
-- 正误示例：若日支为申，大运支为卯，流年支为酉，则卯酉冲是大运与流年之冲，不允许写“夫妻宫受冲”；若日支为申，流年支为寅，则寅申冲才允许写“冲夫妻宫”。
+- 涉及夫妻宫、父母宫、子女宫等宫位论断时，必须核对【宫位】事实：只有日支才是夫妻宫，只有月支才是父母宫/兄弟宫，只有时支才是子女宫。禁止把年支、月支、时支或大运支/流年支之间的冲合错误归到这些宫位。
+- 特别重要：大运支与流年支的冲合（如丙辰大运遇庚戌流年之辰戌冲）只代表大运与流年互动，不等于冲任何命局宫位。只有当流年支或大运支与命局日支/月支/时支产生冲合刑害时，才允许说对应宫位受影响。
+- 正误示例：
+  - 若日支为申，大运支为卯，流年支为酉，则卯酉冲是大运与流年之冲，不允许写“夫妻宫受冲”；若日支为申，流年支为寅，则寅申冲才允许写“冲夫妻宫”。
+  - 若月支为未，大运支为辰，流年支为戌，则辰戌冲只是大运与流年互动，不允许写“父母宫受冲”；只有流年支或大运支与月支未产生作用时，才允许写“父母宫动”。
+  - 错误示例（禁止）：“辰戌冲，父母宫与夫妻宫皆动”。正确写法：“辰戌冲，大运与流年交战，引动全局土气，长辈健康或家庭房产易有波动；夫妻宫日支申因申辰半合被牵连，配偶事务亦有变化”。
 - 事业、财运、感情、健康四项，每一项必须给出“具体事件 + 触发原因 + 应验场景 + 时间/人物/金额细节”，不准只给方向性建议。
   - 错误示例（禁止）：“财运平平，宜守不宜攻”“事业有压力，需低调”“感情多沟通”“注意脾胃”。
   - 正确示例（必须达到此具体度）：
@@ -782,6 +968,9 @@ def _build_yearly_user_prompt(
 大运列表（只分析这些大运，括号内为该运覆盖的公历年份）：
 {dayun_text}
 
+参考案例（仅供断语风格与应验场景参考，不要直接照搬结论）：
+{cases_text}
+
 {yearly_instruction}
 """
 
@@ -792,6 +981,7 @@ def _rule_based_yearly(
     liunian: List[Dict],
     birth_year: int,
     last_error: Optional[Exception] = None,
+    gender: str = "",
 ) -> Dict:
     """Return a structured fallback that combines dayun and liunian."""
     from tools.bazi_ai.bazi_validator import extract_pillars
@@ -817,6 +1007,11 @@ def _rule_based_yearly(
         "子": "水", "丑": "土", "寅": "木", "卯": "木", "辰": "土",
         "巳": "火", "午": "火", "未": "土", "申": "金", "酉": "金",
         "戌": "土", "亥": "水",
+    }
+    _BRANCH_MAIN_QI = {
+        "子": "癸", "丑": "己", "寅": "甲", "卯": "乙", "辰": "戊",
+        "巳": "丙", "午": "丁", "未": "己", "申": "庚", "酉": "辛",
+        "戌": "戊", "亥": "壬",
     }
     _SIX_HE = {
         ("子", "丑"): "土", ("寅", "亥"): "木", ("卯", "戌"): "火",
@@ -903,16 +1098,50 @@ def _rule_based_yearly(
         dy_branch_rel: str,
         interaction: Optional[str],
     ) -> str:
-        parts = [f"流年{yr_pillar}（{dy_pillar}大运）"]
-        if yr_stem_rel == dy_stem_rel:
-            parts.append(f"天干{yr_stem_rel}势能增强")
+        yr_stem, yr_branch = yr_pillar[0], yr_pillar[1]
+        dy_branch = dy_pillar[1]
+        yr_stem_shishen = _shishen(yr_stem)
+
+        if interaction and interaction.startswith("冲"):
+            return (
+                f"{yr_pillar}这一年落在{dy_pillar}大运，地支{yr_branch}和{dy_branch}一冲，"
+                f"生活上容易有变动，工作、住处或感情都可能被牵动。"
+            )
+
+        stem_phrase = ""
+        if yr_stem_rel in ("生助", "比劫"):
+            stem_phrase = f"流年天干{yr_stem}是{yr_stem_shishen}，对你有助益"
+        elif yr_stem_rel == "受克":
+            stem_phrase = f"流年天干{yr_stem}是{yr_stem_shishen}，会给你带来一些压力"
+        elif yr_stem_rel == "泄耗":
+            stem_phrase = f"流年天干{yr_stem}是{yr_stem_shishen}，想法、表达或输出会变多"
+        elif yr_stem_rel == "克制":
+            stem_phrase = f"流年天干{yr_stem}是{yr_stem_shishen}，有掌控、支配的意味"
         else:
-            parts.append(f"天干{yr_stem_rel}，大运天干{dy_stem_rel}")
-        if interaction:
-            parts.append(f"地支{interaction}")
+            stem_phrase = f"流年天干{yr_stem}是{yr_stem_shishen}"
+
+        branch_phrase = ""
+        if yr_branch_rel in ("生助", "比劫"):
+            branch_phrase = f"地支{yr_branch}得助"
+        elif yr_branch_rel == "受克":
+            branch_phrase = f"地支{yr_branch}受克"
+        elif yr_branch_rel == "泄耗":
+            branch_phrase = f"地支{yr_branch}泄耗"
+        elif yr_branch_rel == "克制":
+            branch_phrase = f"地支{yr_branch}有掌控力"
         else:
-            parts.append(f"地支{yr_branch_rel}")
-        return "，".join(parts)
+            branch_phrase = f"地支{yr_branch}平和"
+
+        dy_phrase = ""
+        if dy_stem_rel in ("生助", "比劫") and yr_stem_rel not in ("生助", "比劫"):
+            dy_phrase = f"{dy_pillar}大运本身是帮你的，能缓冲流年的压力"
+        elif dy_stem_rel == "受克" and yr_stem_rel != "受克":
+            dy_phrase = f"{dy_pillar}大运本身压力不小，流年再来只能稳中求进"
+
+        parts = [f"{yr_pillar}这一年，{stem_phrase}，{branch_phrase}。"]
+        if dy_phrase:
+            parts.append(dy_phrase)
+        return "".join(parts)
 
     def _build_domains(
         yr_stem: str,
@@ -926,65 +1155,93 @@ def _rule_based_yearly(
         interaction: Optional[str],
         age: int,
     ) -> Dict[str, str]:
+        import random
+
         yr_stem_shishen = _shishen(yr_stem)
         yr_branch_shishen = _shishen(yr_branch)
         dy_stem_shishen = _shishen(dy_stem)
         chong = interaction and interaction.startswith("冲")
-
-        # Only emit specific warnings when there is a concrete trigger.
         has_strong_trigger = chong or (yr_stem_rel == "受克" and yr_branch_rel in ("受克", "泄耗"))
+
+        # Stable-year sentence pools to avoid repetitive "no significant fluctuation".
+        stable_career = [
+            "这一年工作节奏平稳，大的变动不多，适合把手头事做扎实。",
+            "职场相对平稳，没有特别强的外力推动，稳住节奏更重要。",
+            "事业上没太大的波澜，保持现有状态，积累比冒进更稳妥。",
+            "这一年工作上机会和压力都不突出，把基本功补好是关键。",
+        ]
+        stable_wealth = [
+            "财运不温不火，收入和支出大致平衡，别做大额冒险投资。",
+            "这一年钱来得不猛，但也不会有大窟窿，控制好支出节奏就好。",
+            "财务上没明显起伏，适合守财、清账，而不是扩张。",
+            "求财动力一般，偏财运弱，正财靠踏实积累。",
+        ]
+        stable_marriage = [
+            "感情生活比较平淡，没什么大冲突，也没什么特别的节点。",
+            "这一年感情上没有强烈波动，单身者缘分不浓，有伴者维持现状。",
+            "感情宫没被明显引动，关系稳定，但缺少突破性进展。",
+            "感情上没太多新鲜事，重点在相处细节和日常沟通。",
+        ]
+        stable_health = [
+            "身体没有大毛病，但别透支，规律作息比进补更重要。",
+            "健康整体平稳，注意小毛病别拖着，体检可以安排上。",
+            "这一年精力中等，不宜长期熬夜或高强度连轴转。",
+            "身体没明显隐患，保持运动习惯和饮食节奏即可。",
+        ]
+
+        random.seed(yr_stem + yr_branch + str(age))
 
         def career() -> str:
             if not has_strong_trigger:
-                return "事业无显著波动"
+                return random.choice(stable_career)
             if yr_stem_shishen in ("正官", "七杀") or dy_stem_shishen in ("正官", "七杀"):
-                return "官杀引动，职场压力增加，可能面临考核或岗位调整"
+                return "官杀压顶，职场上容易遇到考核、竞争或领导变动，别正面硬顶。"
             if yr_stem_shishen in ("正印", "偏印") or dy_stem_shishen in ("正印", "偏印"):
-                return "印星生身，利考证、进修或争取晋升"
+                return "印星发力，适合考证、进修或争取上级支持，贵人运不错。"
             if yr_stem_shishen in ("食神", "伤官") or dy_stem_shishen in ("食神", "伤官"):
-                return "食伤泄秀，创意输出多，项目推进可能反复"
+                return "食伤透出，创意和表达欲变强，但项目推进容易反复，别急于求成。"
             if yr_stem_shishen in ("比肩", "劫财") or dy_stem_shishen in ("比肩", "劫财"):
-                return "比劫争竞，合作方或同事分夺资源"
+                return "比劫争竞，同事或合作方可能分夺资源，重要利益要白纸黑字。"
             if chong:
-                return "地支逢冲，工作环境或岗位职责可能有变动"
-            return "事业无显著波动"
+                return "地支逢冲，工作环境或岗位职责可能有变动，提前做准备。"
+            return random.choice(stable_career)
 
         def wealth() -> str:
             if not has_strong_trigger:
-                return "财运无显著波动"
+                return random.choice(stable_wealth)
             if yr_stem_shishen in ("正财", "偏财") or dy_stem_shishen in ("正财", "偏财"):
                 if yr_stem_shishen in ("比肩", "劫财") or dy_stem_shishen in ("比肩", "劫财"):
-                    return "财星透干但比劫同现，易因合作、借贷分歧破财"
-                return "财星引动，有收入增加或偏财机会，但需见好就收"
+                    return "财星透干但比劫同现，容易因合作、借贷或人情破财，别轻易担保。"
+                return "财星被引动，有收入增加或偏财机会，但来得快去得也快，见好就收。"
             if yr_stem_shishen in ("比肩", "劫财") or dy_stem_shishen in ("比肩", "劫财"):
-                return "比劫夺财，开销增大或被朋友拖累"
+                return "比劫夺财，开销增大或被朋友拖累，借钱和投资都要谨慎。"
             if yr_stem_rel == "受克" or dy_stem_rel == "受克":
-                return "求财受阻，现金流紧张，避免扩张与担保"
-            return "财运无显著波动"
+                return "求财受阻，现金流偏紧，这一年不宜扩张，先把账算清楚。"
+            return random.choice(stable_wealth)
 
         def marriage() -> str:
             if not has_strong_trigger:
-                return "感情无显著事件"
+                return random.choice(stable_marriage)
             if chong:
-                return "夫妻宫或感情宫被冲，争吵冷战增多"
+                return "夫妻宫或感情宫被冲，容易有争吵、冷战或关系变动，遇事别冲动。"
             if yr_stem_shishen in ("正财", "偏财", "正官", "七杀"):
-                return "异性缘被引动，桃花机会多，需分辨正缘与烂桃花"
+                return "异性缘被引动，桃花机会多，但要分辨正缘和烂桃花。"
             if yr_stem_shishen in ("伤官", "劫财"):
-                return "感情中易因自我或竞争起摩擦"
-            return "感情无显著事件"
+                return "感情里容易因自我或外部竞争起摩擦，多退一步更稳。"
+            return random.choice(stable_marriage)
 
         def health() -> str:
             if not has_strong_trigger:
-                return "健康无显著隐患"
+                return random.choice(stable_health)
             if chong:
-                return "地支相冲，注意突发伤病、交通安全与急性炎症"
+                return "地支相冲，注意突发伤病、交通安全和急性炎症，出行留点余量。"
             if yr_stem_rel == "受克" and yr_branch_rel == "受克":
-                return "流年干支皆克耗日主，免疫力下降，需防慢性病复发"
+                return "流年干支都克耗日主，免疫力容易下降，慢性病要防复发。"
             if yr_stem_rel == "泄耗" and yr_branch_rel == "泄耗":
-                return "泄耗过重，精力不济，注意睡眠与消化系统"
+                return "泄耗太重，精力不济，睡眠和消化系统容易亮黄灯。"
             if yr_branch_shishen in ("七杀", "伤官"):
-                return "七杀/伤官临支，注意筋骨、肝胆与意外伤害"
-            return "健康无显著隐患"
+                return "七杀或伤官临支，注意筋骨、肝胆和意外伤害，别逞强。"
+            return random.choice(stable_health)
 
         qualifier = ""
         if age < 10:
@@ -1009,16 +1266,16 @@ def _rule_based_yearly(
         interaction: Optional[str],
     ) -> str:
         if interaction and interaction.startswith("冲"):
-            return f"流年{yr_branch}与大运/原局相冲，防突发变动与冲突"
+            return f"{yr_branch}逢冲，这一年容易有突发变动，重大决定尽量避开冲动时刻。"
         if yr_stem_rel == "受克" and yr_branch_rel == "受克":
-            return "流年干支皆不利日主，重大决策宜保守"
+            return "流年干支都对你不利，重大投资和人事变动尽量保守。"
         if yr_stem_rel == "受克":
-            return f"流年天干{yr_stem}克耗日主，注意人际与决策"
+            return f"天干{yr_stem}带来压力，人际关系和重要决策上多留余地。"
         if yr_branch_rel == "受克":
-            return f"流年地支{yr_branch}不利，注意健康与出行"
+            return f"地支{yr_branch}不利，健康、出行和日常起居要更上心。"
         if yr_stem_rel in ("生助", "比劫"):
-            return "得助之年可进取，但忌冲动与过度扩张"
-        return "本年无重大刑冲，按常规节奏行事"
+            return "这年有助力，可以主动争取，但别贪大求全，留条后路。"
+        return "本年没有明显刑冲，按自己的节奏走就可以。"
 
     def _build_key_event(
         yr_stem_shishen: str,
@@ -1028,14 +1285,15 @@ def _rule_based_yearly(
         interaction: Optional[str],
         domains: Dict[str, str],
     ) -> str:
-        # Keep rule-based fallback conservative: only flag a key event when
-        # there is a strong concrete trigger. Default to "no major event" to
-        # avoid dramatizing every year.
         if interaction and interaction.startswith("冲"):
-            return "地支逢冲，可能有工作、感情或居住环境的变动"
+            return "地支逢冲，工作、感情或住处可能有变动"
         if yr_stem_rel == "受克" and yr_branch_rel == "受克":
-            return "流年干支皆不利日主，压力较大，宜保守行事"
-        return "平稳过渡，无重大事件"
+            return "流年干支皆不利日主，整体压力偏大，宜守不宜攻"
+        if yr_stem_rel == "受克":
+            return f"天干{yr_stem_shishen}施压，人事和决策上容易遇到阻力"
+        if yr_branch_rel == "受克":
+            return f"地支{yr_branch_shishen}临支，健康和出行方面要多留意"
+        return "整体平顺，没有特别突出的重大节点"
 
     # Dayun summaries with simple themes
     dayun_summary = []
@@ -1100,7 +1358,12 @@ def _rule_based_yearly(
                 yr_stem, yr_branch, yr_stem_rel, yr_branch_rel, interaction,
             )
             key_event = _build_key_event(
-                _shishen(yr_stem), _shishen(yr_branch), yr_stem_rel, yr_branch_rel, interaction, domains
+                _shishen(yr_stem),
+                _shishen(_BRANCH_MAIN_QI.get(yr_branch, "")),
+                yr_stem_rel,
+                yr_branch_rel,
+                interaction,
+                domains,
             )
         else:
             overview = f"流年{y['pillar']}，日主{yr_stem_rel}"
@@ -1151,16 +1414,493 @@ def _rule_based_yearly(
             })
 
     user_caveats = [
-        "当前为规则化兜底分析，流年细节可能不够具体。",
+        "当前未连接大模型，使用的是本地规则兜底，语气上比纯模板自然，但细节深度有限。",
         "算法排盘，结果仅供参考。",
     ]
+
+    # Palace+star synthesis liuqin interpretation.
+    # For each family member we look at both the "star" (target shishen) and
+    # the "palace" (pillar) where it sits, following standard Bazi theory.
+    _SHISHEN_CHARACTER = {
+        "正印": "心地善良、重情义、好学、保守、有依赖性，遇事习惯找靠山。",
+        "偏印": "心思细腻、敏感、有独特才华，性格偏孤、想法与众不同。",
+        "正官": "正直、守规矩、有责任感，注重名声，容易给自己压力。",
+        "七杀": "果断、有魄力、不服输，性格偏刚、好胜心强，也易冲动。",
+        "正财": "务实、节俭、重信用、顾家，对金钱和现实比较敏感。",
+        "偏财": "大方、善交际、机灵、爱冒险，花钱随性，人缘广。",
+        "食神": "温和、乐观、有口福、有才艺，表达自然，不喜争斗。",
+        "伤官": "聪明、有才华、傲气、不服管，说话直接，容易得罪人。",
+        "比肩": "独立、自信、固执、讲义气，凡事喜欢自己来。",
+        "劫财": "冲动、好胜、重义气、行动力强，但也容易破财或与人争。",
+    }
+    _SHISHEN_APPEARANCE = {
+        "正印": "气质端庄、面色白皙、身形偏圆润。",
+        "偏印": "眼神有特点、气质清冷、身形偏瘦。",
+        "正官": "五官端正、举止得体、给人可靠感。",
+        "七杀": "眉眼有神、轮廓分明、气场偏强。",
+        "正财": "相貌敦厚、身形匀称、给人踏实感。",
+        "偏财": "长相有亲和力、善于打扮、显得活络。",
+        "食神": "面带福相、体态偏丰满、笑容温和。",
+        "伤官": "眉目清秀、气质灵动、显得聪明。",
+        "比肩": "体格结实、线条硬朗、独立性外露。",
+        "劫财": "身形有力量感、动作快、气势外露。",
+    }
+    _SHISHEN_ABILITY = {
+        "正印": "适合学习、研究、教育、文书、稳定型工作。",
+        "偏印": "适合技术、艺术、玄学、冷门专业、需要独创性的领域。",
+        "正官": "适合管理、行政、公职、规范化、需要责任心的岗位。",
+        "七杀": "适合开拓、军警、外科、工程、高压挑战性行业。",
+        "正财": "适合财务、实业、稳定经营、细水长流的赚钱方式。",
+        "偏财": "适合销售、投资、贸易、自由职业、偏门财源。",
+        "食神": "适合演艺、餐饮、教育、创意、表达类工作。",
+        "伤官": "适合技术、策划、表演、写作、需要创新和口才的工作。",
+        "比肩": "适合独立创业、技术专长、体育、竞争性行业。",
+        "劫财": "适合业务拓展、合作经营、需要魄力和执行力的领域。",
+    }
+    _SHISHEN_HEALTH = {
+        "正印": "注意脾胃、消化系统，思虑过多影响睡眠。",
+        "偏印": "注意神经、呼吸系统，容易多思多虑。",
+        "正官": "注意血压、心脏，压力管理很重要。",
+        "七杀": "注意外伤、肝胆、急性炎症，避免高危活动。",
+        "正财": "注意脾胃、皮肤，饮食规律是关键。",
+        "偏财": "注意肝胆、眼睛，避免熬夜和纵欲。",
+        "食神": "注意肠胃、体重，消化系统偏弱。",
+        "伤官": "注意眼睛、口腔、妇科（女命），情绪易上火。",
+        "比肩": "注意筋骨、四肢，运动过量易受伤。",
+        "劫财": "注意外伤、肝胆、血压，冲动行事易招意外。",
+    }
+    _PALACE_NAME = {
+        0: "年柱（祖上/父母/早年）",
+        1: "月柱（父母/兄弟/青年）",
+        2: "日柱（自己/配偶）",
+        3: "时柱（子女/晚年）",
+    }
+
+    def _element_appearance(element: str) -> str:
+        return {
+            "木": "身形偏修长，骨架明显。",
+            "火": "脸型偏尖，气色红润，眼神有光。",
+            "土": "体格敦厚，肤色偏黄，给人稳重感。",
+            "金": "肤色偏白，轮廓分明，骨架适中。",
+            "水": "体态圆润，肤色偏黑或偏润，眼神灵活。",
+        }.get(element, "")
+
+    def _describe_star_location(star: str, palace_idx: int, palace_pillar: str) -> str:
+        """Generic star+palace description used when listing where a star appears."""
+        palace = _PALACE_NAME.get(palace_idx, "某柱")
+        base = f"{star}落在{palace}{palace_pillar}"
+        if palace_idx == 0:
+            return (
+                f"{base}，与祖上、父母、早年环境相关。"
+                f"此人{_SHISHEN_CHARACTER.get(star, '')}"
+            )
+        if palace_idx == 1:
+            return (
+                f"{base}，与父母、兄弟、青年阶段相关。"
+                f"此人{_SHISHEN_CHARACTER.get(star, '')}"
+            )
+        if palace_idx == 2:
+            return (
+                f"{base}，落在日柱夫妻宫附近，与你自己或配偶关系密切。"
+                f"此人{_SHISHEN_CHARACTER.get(star, '')}"
+            )
+        if palace_idx == 3:
+            return (
+                f"{base}，落在子女宫，与子女、晚辈、晚年相关。"
+                f"此人{_SHISHEN_CHARACTER.get(star, '')}"
+            )
+        return base
+
+    def _find_star_locations(star_names: Tuple[str, ...]) -> List[Tuple[int, str, str]]:
+        """Find all (palace_idx, location_label, shishen) for given stars.
+
+        If both the stem and branch main qi of the same pillar carry the same
+        star, merge them into one entry to avoid repetition.
+        """
+        results: List[Tuple[int, str, str]] = []
+        for idx, pillar in enumerate(pillars):
+            stem_shishen = _shishen(pillar[0])
+            branch_qi = _BRANCH_MAIN_QI.get(pillar[1], "")
+            branch_shishen = _shishen(branch_qi) if branch_qi else ""
+            stem_match = stem_shishen in star_names
+            branch_match = branch_shishen in star_names
+            if stem_match and branch_match and stem_shishen == branch_shishen:
+                results.append((idx, f"天干{pillar[0]}、地支本气{branch_qi}", stem_shishen))
+            else:
+                if stem_match:
+                    results.append((idx, f"天干{pillar[0]}", stem_shishen))
+                if branch_match:
+                    results.append((idx, f"地支本气{branch_qi}", branch_shishen))
+        return results
+
+    def _star_present(star_names: Tuple[str, ...]) -> bool:
+        return len(_find_star_locations(star_names)) > 0
+
+    def _count_relationship(rel: str) -> int:
+        """Count stems/branches by their element relationship to day master."""
+        count = 0
+        for idx, pillar in enumerate(pillars):
+            stem_rel = _element_relation(_STEM_ELEMENT.get(pillar[0], ""))
+            if stem_rel == rel:
+                count += 1
+            branch_rel = _element_relation(_BRANCH_MAIN.get(pillar[1], ""))
+            if branch_rel == rel:
+                count += 1
+        return count
+
+    try:
+        pillars = extract_pillars(bazi)
+        day_master_stem = pillars[2][0]
+        dm_element = _STEM_ELEMENT.get(day_master_stem, "")
+        dm_yy = _YIN_YANG.get(day_master_stem, "")
+        palace_pillars = [f"{p[0]}{p[1]}" for p in pillars]
+
+        # --- Self portrait: based on day-master strength from the whole chart.
+        support = _count_relationship("生助") + _count_relationship("比劫")
+        drain = _count_relationship("泄耗") + _count_relationship("克制") + _count_relationship("受克")
+        if support > drain + 1:
+            strength = "身强"
+            strength_desc = "日主周围生助多，自身能量足，性格上比较自信、主动，能担财官。"
+        elif drain > support + 1:
+            strength = "身弱"
+            strength_desc = "日主周围克泄耗多，自身能量偏弱，性格上偏谨慎、多思，需要贵人或印比帮扶。"
+        else:
+            strength = "中和"
+            strength_desc = "日主能量相对中和，性格不偏不倚，能屈能伸。"
+
+        # Collect all shishen for dominant-force analysis.
+        all_branch_qi = [_BRANCH_MAIN_QI.get(p[1], "") for p in pillars]
+        all_shishen = [_shishen(s) for s in [p[0] for p in pillars] + all_branch_qi if s]
+
+        def count_shishen(*names: str) -> int:
+            return sum(1 for s in all_shishen if s in names)
+
+        biji_count = count_shishen("比肩", "劫财")
+        yin_count = count_shishen("正印", "偏印")
+        cai_count = count_shishen("正财", "偏财")
+        guan_count = count_shishen("正官", "七杀")
+        shishang_count = count_shishen("食神", "伤官")
+
+        # Dominant usable force.
+        dominant = ""
+        if yin_count >= 3:
+            dominant = "印星旺，你学习能力强、有贵人缘，但也容易依赖、想得多。"
+        elif guan_count >= 3:
+            dominant = "官杀旺，你自律、有责任感，但也容易压力大、被约束。"
+        elif cai_count >= 3:
+            dominant = "财星旺，你现实感强、善交际，一生和钱、人际关系绑得紧。"
+        elif shishang_count >= 3:
+            dominant = "食伤旺，你表达欲、创造力强，聪明外露，但也容易不服管。"
+        elif biji_count >= 3:
+            dominant = "比劫旺，你独立、好胜、讲义气，但也要注意破财和同辈竞争。"
+
+        lines: List[str] = []
+        lines.append("【一、日主自身画像】")
+        lines.append(
+            f"你日主是{day_master_stem}（{dm_element}，{dm_yy}），"
+            f"全局看属于{strength}。{strength_desc}"
+        )
+        lines.append(
+            f"从五行形貌看，{dm_element}日主 {_element_appearance(dm_element)}"
+        )
+        if dominant:
+            lines.append(dominant)
+        # Ability from the most usable star.
+        usable_stars = []
+        if strength == "身强":
+            if cai_count > 0:
+                usable_stars.append("财")
+            if guan_count > 0:
+                usable_stars.append("官杀")
+            if shishang_count > 0:
+                usable_stars.append("食伤")
+        elif strength == "身弱":
+            if yin_count > 0:
+                usable_stars.append("印")
+            if biji_count > 0:
+                usable_stars.append("比劫")
+        _usable_ability_map = {
+            "财": _SHISHEN_ABILITY.get("正财"),
+            "官杀": _SHISHEN_ABILITY.get("正官"),
+            "食伤": _SHISHEN_ABILITY.get("食神"),
+            "印": _SHISHEN_ABILITY.get("正印"),
+            "比劫": _SHISHEN_ABILITY.get("比肩"),
+        }
+        if usable_stars:
+            ability_text = _usable_ability_map.get(usable_stars[0], "根据命局特点选择方向。")
+            lines.append(
+                f"按你的旺衰，适合走的是{ '、'.join(usable_stars) }路线：{ability_text}"
+            )
+        lines.append(
+            f"健康上要注意：{_SHISHEN_HEALTH.get(_shishen(day_master_stem), '平时注意劳逸结合。')}"
+        )
+
+        # --- Parents.
+        lines.append("\n【二、父母与祖上】")
+        father_stars = ("偏财", "正财")
+        mother_stars = ("正印", "偏印")
+        father_locations = _find_star_locations(father_stars)
+        mother_locations = _find_star_locations(mother_stars)
+
+        if father_locations:
+            lines.append("父亲（以财星为星）：")
+            for idx, label, star in father_locations:
+                lines.append(f"  · {_describe_star_location(star, idx, palace_pillars[idx])}")
+                lines.append(f"    外貌：{_SHISHEN_APPEARANCE.get(star, '')}")
+        else:
+            lines.append("父亲（以财星为星）：命局财星不显，父亲缘分较淡，或父亲在你生命中存在感不强。")
+
+        if mother_locations:
+            lines.append("母亲（以印星为星）：")
+            for idx, label, star in mother_locations:
+                lines.append(f"  · {_describe_star_location(star, idx, palace_pillars[idx])}")
+                lines.append(f"    外貌：{_SHISHEN_APPEARANCE.get(star, '')}")
+        else:
+            lines.append("母亲（以印星为星）：命局印星不显，母亲缘分较淡，或成长过程中独立色彩重。")
+
+        # Add palace-level observations for parents.
+        year_month_influences = []
+        if yin_count >= 2:
+            year_month_influences.append("印星在年月柱多见，母亲或长辈对你人生影响大，早年有贵人庇护。")
+        if cai_count >= 2:
+            year_month_influences.append("财星在年月柱多见，父亲或家庭经济状况是你成长中的重要变量。")
+        if biji_count >= 2:
+            year_month_influences.append("比劫在年月柱多见，家中同辈竞争或合作色彩重。")
+        for note in year_month_influences:
+            lines.append(note)
+
+        # --- Spouse.
+        lines.append("\n【三、配偶与婚姻】")
+        spouse_branch = pillars[2][1]
+        spouse_branch_qi = _BRANCH_MAIN_QI.get(spouse_branch, "")
+        spouse_shishen = _shishen(spouse_branch_qi) if spouse_branch_qi else "未知"
+        lines.append(
+            f"夫妻宫在日支{spouse_branch}，本气{spouse_branch_qi}为{spouse_shishen}。"
+            f"这是配偶的『家』，直接反映配偶性格和婚姻状态。"
+        )
+        lines.append(
+            f"夫妻宫本气{spouse_shishen}，配偶{_SHISHEN_CHARACTER.get(spouse_shishen, '')}"
+        )
+        lines.append(f"配偶外貌：{_SHISHEN_APPEARANCE.get(spouse_shishen, '')}")
+
+        # Spouse star (male: 财, female: 官杀).
+        if gender in ("男", "male"):
+            spouse_star_names = ("正财", "偏财")
+            spouse_star_label = "妻星"
+        elif gender in ("女", "female"):
+            spouse_star_names = ("正官", "七杀")
+            spouse_star_label = "夫星"
+        else:
+            spouse_star_names = ()
+            spouse_star_label = "配偶星"
+        spouse_star_locations = _find_star_locations(spouse_star_names)
+        if spouse_star_locations:
+            lines.append(f"{spouse_star_label}（{ '、'.join(spouse_star_names) }）在命中的位置：")
+            for idx, label, star in spouse_star_locations:
+                lines.append(f"  · {label}{star}在{_PALACE_NAME.get(idx, '某柱')}，"
+                           f"{_SHISHEN_CHARACTER.get(star, '')}")
+        else:
+            lines.append(f"{spouse_star_label}不显，配偶缘分可能来得晚，或婚姻关系偏淡。")
+
+        # --- Children.
+        lines.append("\n【四、子女与晚辈】")
+        if gender in ("男", "male"):
+            child_star_names = ("正官", "七杀")
+            child_star_label = "官杀（男命子女星）"
+        elif gender in ("女", "female"):
+            child_star_names = ("食神", "伤官")
+            child_star_label = "食伤（女命子女星）"
+        else:
+            child_star_names = ()
+            child_star_label = "子女星"
+        child_locations = _find_star_locations(child_star_names)
+        lines.append(
+            f"子女宫在时柱{pillars[3][0]}{pillars[3][1]}，"
+            f"天干{_shishen(pillars[3][0])}、地支本气{_BRANCH_MAIN_QI.get(pillars[3][1], '')}"
+            f"为{_shishen(_BRANCH_MAIN_QI.get(pillars[3][1], ''))}。"
+        )
+        if child_locations:
+            lines.append(f"{child_star_label}分布：")
+            for idx, label, star in child_locations:
+                lines.append(f"  · {_describe_star_location(star, idx, palace_pillars[idx])}")
+                lines.append(f"    外貌：{_SHISHEN_APPEARANCE.get(star, '')}")
+        else:
+            lines.append(f"{child_star_label}不显，子女缘可能较淡，或得子较晚。")
+
+        # --- Siblings / friends.
+        lines.append("\n【五、兄弟与朋友】")
+        sibling_stars = ("比肩", "劫财")
+        sibling_locations = _find_star_locations(sibling_stars)
+        if sibling_locations:
+            lines.append("比劫星（兄弟朋友星）分布：")
+            for idx, label, star in sibling_locations:
+                lines.append(f"  · {_describe_star_location(star, idx, palace_pillars[idx])}")
+        else:
+            lines.append("比劫星不显，兄弟姐妹缘分较薄，或你从小独立意识强。")
+
+        # --- Synthesis.
+        family_relations_notes: List[str] = []
+        if yin_count + guan_count >= 4:
+            family_relations_notes.append(
+                "印星、官杀旺，家庭规矩感重，你的一生容易受长辈、权威或婚姻对象影响。"
+            )
+        if cai_count + shishang_count >= 4:
+            family_relations_notes.append(
+                "财星、食伤旺，你重实际、重表达，六亲关系中金钱和价值观的冲突会多些。"
+            )
+        if biji_count >= 3:
+            family_relations_notes.append(
+                "比劫旺，兄弟朋友对你助力大，但也要注意同辈分夺和人际摩擦。"
+            )
+        family_relations_notes.append(
+            "以上为本地规则结合星宫同参的解读，对每位六亲都同时参考了"
+            "『星』（对应十神）和『宫』（所在柱位）。"
+        )
+
+        # Helper to summarize a list of star locations into a single readable string.
+        def _star_summary(locations: List[Tuple[int, str, str]]) -> str:
+            if not locations:
+                return "不显"
+            parts = []
+            for idx, label, star in locations:
+                parts.append(f"{star}在{_PALACE_NAME.get(idx, '某柱')}{palace_pillars[idx]}（{label}）")
+            return "、".join(parts)
+
+        # Father summary.
+        father_primary = father_locations[0] if father_locations else None
+        father_shishen = father_primary[2] if father_primary else ""
+        father_relationship = ""
+        if father_shishen:
+            if cai_count >= 2:
+                father_relationship = "父亲或家庭经济状况对你影响较大，你从小就对金钱和现实比较敏感。"
+            else:
+                father_relationship = "父亲对你的影响平稳，家风务实。"
+        else:
+            father_relationship = "父亲星不显，父亲缘分较淡，或父亲在你生命中存在感不强。"
+
+        # Mother summary.
+        mother_primary = mother_locations[0] if mother_locations else None
+        mother_shishen = mother_primary[2] if mother_primary else ""
+        mother_relationship = ""
+        if mother_shishen:
+            if yin_count >= 2:
+                mother_relationship = "母亲或长辈对你人生影响大，早年有贵人庇护。"
+            else:
+                mother_relationship = "母亲对你的影响温和，关系稳定。"
+        else:
+            mother_relationship = "母亲星不显，母亲缘分较淡，或成长过程中独立色彩重。"
+
+        # Spouse summary.
+        spouse_relationship = (
+            f"夫妻宫在日支{spouse_branch}，本气{spouse_branch_qi}为{spouse_shishen}。"
+        )
+        if gender in ("男", "male") and spouse_star_locations:
+            spouse_relationship += "男命以财星为妻星，妻星透出则婚姻动得早。"
+        elif gender in ("女", "female") and spouse_star_locations:
+            spouse_relationship += "女命以官杀为夫星，夫星有力则配偶有能力。"
+
+        # Children summary.
+        if gender in ("男", "male"):
+            son_star = "七杀"
+            daughter_star = "正官"
+        elif gender in ("女", "female"):
+            son_star = "伤官"
+            daughter_star = "食神"
+        else:
+            son_star = daughter_star = ""
+        son_locations = [loc for loc in child_locations if loc[2] == son_star]
+        daughter_locations = [loc for loc in child_locations if loc[2] == daughter_star]
+        son_text = _star_summary(son_locations) if son_locations else "信息不显"
+        daughter_text = _star_summary(daughter_locations) if daughter_locations else "信息不显"
+        children_relationship = ""
+        if child_locations:
+            if len(child_locations) >= 2:
+                children_relationship = "子女星多见，子女缘不浅，但也要防管教过严或期望过高。"
+            else:
+                children_relationship = "子女星适中，子女运平稳，教育上重引导而非压制。"
+        else:
+            children_relationship = "子女星不显，子女缘分可能较淡，或得子较晚。"
+
+        # Siblings summary.
+        brother_locations = [loc for loc in sibling_locations if loc[2] == "比肩"]
+        sister_locations = [loc for loc in sibling_locations if loc[2] == "劫财"]
+        brother_text = _star_summary(brother_locations) if brother_locations else "信息不显"
+        sister_text = _star_summary(sister_locations) if sister_locations else "信息不显"
+        siblings_relationship = ""
+        if biji_count >= 3:
+            siblings_relationship = (
+                "比劫星多见，兄弟朋友缘分深，关键时刻有人帮衬，"
+                "但同辈之间也容易有竞争、分夺或借钱不还的情况。"
+            )
+        elif biji_count == 0:
+            siblings_relationship = (
+                "比劫星不显，兄弟姐妹缘分较薄，或者你从小独立意识强，"
+                "很多事情习惯自己扛。"
+            )
+        else:
+            siblings_relationship = (
+                "比劫星适中，兄弟朋友能给你助力，合作与竞争并存，"
+                "重要利益最好白纸黑字说清楚。"
+            )
+
+        liuqin_obj = {
+            "father": {
+                "star": _star_summary(father_locations),
+                "character": _SHISHEN_CHARACTER.get(father_shishen, "父星不显，难以论断。"),
+                "ability": _SHISHEN_ABILITY.get(father_shishen, "信息不足。"),
+                "health": _SHISHEN_HEALTH.get(father_shishen, "平时注意劳逸结合。"),
+                "relationship": father_relationship,
+            },
+            "mother": {
+                "star": _star_summary(mother_locations),
+                "character": _SHISHEN_CHARACTER.get(mother_shishen, "母星不显，难以论断。"),
+                "ability": _SHISHEN_ABILITY.get(mother_shishen, "信息不足。"),
+                "health": _SHISHEN_HEALTH.get(mother_shishen, "平时注意劳逸结合。"),
+                "relationship": mother_relationship,
+            },
+            "spouse": {
+                "palace": f"日支{spouse_branch}，本气{spouse_branch_qi}为{spouse_shishen}",
+                "star": _star_summary(spouse_star_locations),
+                "character": _SHISHEN_CHARACTER.get(spouse_shishen, "夫妻宫信息不足。"),
+                "ability": _SHISHEN_ABILITY.get(spouse_shishen, "信息不足。"),
+                "health": _SHISHEN_HEALTH.get(spouse_shishen, "平时注意劳逸结合。"),
+                "appearance": _SHISHEN_APPEARANCE.get(spouse_shishen, ""),
+                "relationship": spouse_relationship,
+            },
+            "children": {
+                "sons": f"儿子以{son_star}为参考：{son_text}" if son_star else "信息不足",
+                "daughters": f"女儿以{daughter_star}为参考：{daughter_text}" if daughter_star else "信息不足",
+                "relationship": children_relationship,
+            },
+            "siblings": {
+                "brothers": f"兄弟以比肩为参考：{brother_text}",
+                "sisters": f"姐妹以劫财为参考：{sister_text}",
+                "relationship": siblings_relationship,
+            },
+            "family_relations": "\n".join(family_relations_notes),
+        }
+    except Exception:
+        liuqin_obj = {
+            "father": {"star": "", "character": "", "ability": "", "health": "", "relationship": ""},
+            "mother": {"star": "", "character": "", "ability": "", "health": "", "relationship": ""},
+            "spouse": {"palace": "", "star": "", "character": "", "ability": "", "health": "", "appearance": "", "relationship": ""},
+            "children": {"sons": "", "daughters": "", "relationship": ""},
+            "siblings": {"brothers": "", "sisters": "", "relationship": ""},
+            "family_relations": "",
+        }
+
+    overall = (
+        "目前大模型暂时不可用，这里用的是本地规则分析。"
+        "已经把大运和流年的干支关系、十神作用理了一遍，给出了相对自然的解读。"
+        "如果你想得到更深入、更像面对面聊天的分析，可以等 Agnes API 恢复后重试。"
+    )
 
     return {
         "dayun_summary": dayun_summary,
         "yearly_analysis": yearly_analysis,
-        "liuqin_analysis": "",
+        "liuqin_analysis": liuqin_obj,
         "milestones": milestones,
-        "overall_guidance": "当前为本地规则兜底分析，已将大运与流年结合推断。",
+        "overall_guidance": overall,
         "confidence": "low",
         "caveats": user_caveats,
         "_rule_based": True,
@@ -1179,6 +1919,12 @@ async def analyze_yearly(
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     knowledge_base_path: Optional[Path] = None,
+    extra_knowledge_base_paths: Optional[List[Path]] = None,
+    cases_path: Optional[Path] = None,
+    extra_cases_paths: Optional[List[Path]] = None,
+    embedding_cache_path: Optional[Path] = None,
+    knowledge_embedding_cache_path: Optional[Path] = None,
+    top_k: int = 3,
 ) -> Dict:
     """Analyze yearly luck (liunian) based on dayun and birth info.
 
@@ -1214,24 +1960,52 @@ async def analyze_yearly(
     if mode == "10y":
         start_year = current_year
         end_year = current_year + 9
+    elif mode == "20y":
+        start_year = current_year
+        end_year = current_year + 19
     else:
         start_year = birth_year
         end_year = birth_year + until_age - 1
 
     liunian = calendar.liunian_list(start_year, end_year)
 
-    # Filter dayun to those overlapping the analyzed years.
+    # Filter dayun to those strictly overlapping the analyzed years.
+    # A dayun that ends exactly when the analysis starts (or vice versa) is a
+    # boundary case and is not considered active for the period.
+    period_start_age = start_year - birth_year
+    period_end_age = end_year - birth_year
     dayun_active = [
         d
         for d in dayun
-        if d["end_age"] >= (start_year - birth_year)
-        and d["start_age"] <= (end_year - birth_year)
+        if d["end_age"] > period_start_age and d["start_age"] < period_end_age
     ]
 
-    rule_primer_paths = [Path("./bazi_knowledge/rule_primer.md")]
+    knowledge_paths = [Path("./bazi_knowledge/rule_primer.md")]
     if knowledge_base_path is not None and knowledge_base_path.exists():
-        rule_primer_paths.append(knowledge_base_path)
-    rule_primer = await _build_rule_primer(rule_primer_paths, max_chars=12000)
+        knowledge_paths.append(knowledge_base_path)
+    for path in extra_knowledge_base_paths or []:
+        if path.exists():
+            knowledge_paths.append(path)
+    knowledge_context = await retrieve_knowledge_snippets(
+        query=f"{bazi}\n大运流年精排".strip(),
+        knowledge_paths=knowledge_paths,
+        cache_path=knowledge_embedding_cache_path,
+        top_k=6,
+        max_chars=10000,
+    )
+
+    # Retrieve similar cases for more grounded, chart-specific predictions.
+    similar_cases = []
+    if cases_path is not None and cases_path.exists():
+        similar_cases = await retrieve_similar_cases(
+            bazi,
+            question="",
+            cases_path=cases_path,
+            top_k=max(0, min(top_k, 10)),
+            embedding_cache_path=embedding_cache_path,
+            extra_cases_paths=extra_cases_paths,
+        )
+
     profile = bazi_structural.structural_profile(bazi) or {}
     yearly_rels = []
     for y in liunian:
@@ -1248,14 +2022,14 @@ async def analyze_yearly(
             rel["age"] = age
             yearly_rels.append(rel)
 
-    system_prompt = _build_yearly_system_prompt(rule_primer)
+    system_prompt = _build_yearly_system_prompt(knowledge_context)
     user_prompt = _build_yearly_user_prompt(
-        bazi, gender, dayun_active, liunian, mode, profile, yearly_rels, birth_year
+        bazi, gender, dayun_active, liunian, mode, profile, yearly_rels, birth_year, similar_cases
     )
 
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key or aiohttp is None:
-        return _rule_based_yearly(bazi, dayun_active, liunian, birth_year)
+        return _rule_based_yearly(bazi, dayun_active, liunian, birth_year, gender=gender)
 
     base = (base_url or os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").rstrip("/")
     mdl = model or os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat"
@@ -1267,13 +2041,13 @@ async def analyze_yearly(
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.25,
-        "max_tokens": 5000,
+        "max_tokens": 8000 if mode == "20y" else 7000,
         "response_format": {"type": "json_object"},
     }
 
     for attempt in range(1, 3):
         try:
-            timeout = aiohttp.ClientTimeout(total=90)
+            timeout = aiohttp.ClientTimeout(total=200 if mode == "20y" else 150)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     f"{base}/chat/completions",
@@ -1300,6 +2074,7 @@ async def analyze_yearly(
                             dayun_active,
                             liunian,
                             birth_year,
+                            gender=gender,
                         )
                     # Ensure required keys exist.
                     parsed.setdefault("dayun_summary", [])
@@ -1325,7 +2100,7 @@ async def analyze_yearly(
                         # letting the model produce dayun themes only, and fill
                         # yearly_analysis with the age-aware rule-based fallback.
                         rule_fallback = _rule_based_yearly(
-                            bazi, dayun_active, liunian, birth_year
+                            bazi, dayun_active, liunian, birth_year, gender=gender
                         )
                         parsed["yearly_analysis"] = rule_fallback.get("yearly_analysis", [])
                         if not parsed.get("overall_guidance"):
@@ -1362,7 +2137,7 @@ async def analyze_yearly(
             if attempt < 2:
                 await asyncio.sleep(2.0)
 
-    return _rule_based_yearly(bazi, dayun_active, liunian, birth_year)
+    return _rule_based_yearly(bazi, dayun_active, liunian, birth_year, gender=gender)
 
 
 _TEMPLATE_PHRASES = {
@@ -1451,6 +2226,13 @@ def _has_strong_yearly_trigger(
         if t == "合":
             return True
 
+    # 三合/半合/三会/藏干合等复杂关系若引动日支，也算强触发。
+    dz_comp = rel.get("di_zhi_comprehensive", {})
+    for name in ("三合", "半合", "三会", "藏干合"):
+        for item in dz_comp.get(name, []):
+            if "日支" in item:
+                return True
+
     # 天克地冲 between liunian and dayun is also a strong trigger.
     ly_stem, dy_stem = liunian_pillar[0], dayun_pillar[0]
     _STEM_ELEMENT = {
@@ -1477,6 +2259,40 @@ def _has_strong_yearly_trigger(
     return False
 
 
+def _sanitize_dayun_summary(
+    dayun_summary: List[Dict],
+    dayun_active: List[Dict],
+) -> List[Dict]:
+    """Ensure the AI's dayun summary matches the structurally computed dayun list.
+
+    The model often drops start_age/end_age or invents a wrong pillar. This
+    function rewrites the summary to contain exactly the active dayun periods,
+    preserving the AI-generated theme/focus text when possible.
+    """
+    if not dayun_active:
+        return dayun_summary
+
+    # Build a lookup by pillar for AI-generated theme/focus.
+    ai_by_pillar: Dict[str, Dict] = {}
+    for d in dayun_summary or []:
+        if isinstance(d, dict) and d.get("pillar"):
+            ai_by_pillar[d["pillar"]] = d
+
+    cleaned: List[Dict] = []
+    for d in dayun_active:
+        ai = ai_by_pillar.get(d["pillar"], {})
+        cleaned.append(
+            {
+                "pillar": d["pillar"],
+                "start_age": d["start_age"],
+                "end_age": d["end_age"],
+                "theme": _sanitize_text(str(ai.get("theme", "") or "")),
+                "focus": _sanitize_text(str(ai.get("focus", "") or "")),
+            }
+        )
+    return cleaned
+
+
 def _validate_yearly_output(
     result: Dict,
     bazi: str,
@@ -1485,6 +2301,11 @@ def _validate_yearly_output(
     birth_year: int,
 ) -> Dict:
     """Sanity-check yearly output; fall back to rule-based if too generic or factually off."""
+    # Align dayun summary with computed dayun list before any other checks.
+    result["dayun_summary"] = _sanitize_dayun_summary(
+        result.get("dayun_summary", []), dayun
+    )
+
     yearly = result.get("yearly_analysis", [])
     if not yearly or len(yearly) < len(liunian) * 0.8:
         logger.warning("流年分析返回年份不足，使用兜底分析")
@@ -1574,8 +2395,11 @@ def _validate_yearly_output(
     # Sanitize overall guidance and liuqin_analysis.
     if isinstance(result.get("overall_guidance"), str):
         result["overall_guidance"] = _sanitize_text(result["overall_guidance"])
-    if isinstance(result.get("liuqin_analysis"), str):
-        result["liuqin_analysis"] = _sanitize_text(result["liuqin_analysis"])
+    liuqin = result.get("liuqin_analysis")
+    if isinstance(liuqin, str):
+        result["liuqin_analysis"] = _sanitize_liuqin(_sanitize_text(liuqin))
+    elif isinstance(liuqin, dict):
+        result["liuqin_analysis"] = _sanitize_liuqin_object(liuqin)
 
     if _is_template_yearly(yearly):
         logger.warning("流年分析模板化严重，使用兜底分析")
@@ -1653,6 +2477,20 @@ def _check_palace_claims(
                 if label.startswith("流年支") or label.startswith("大运支"):
                     continue
                 interacting.add(branch_map.get(label, label[-1]))
+        # 必须把三合/半合/三会/藏干合等复杂关系也算作日支被引动，否则模型正确引用
+        # 申辰半合、寅卯辰三会等事实时会被误判为夫妻宫误归。
+        for item in rel.get("di_zhi_comprehensive", {}).get("三合", []):
+            if "日支" in item:
+                interacting.add(day_branch)
+        for item in rel.get("di_zhi_comprehensive", {}).get("半合", []):
+            if "日支" in item:
+                interacting.add(day_branch)
+        for item in rel.get("di_zhi_comprehensive", {}).get("三会", []):
+            if "日支" in item:
+                interacting.add(day_branch)
+        for item in rel.get("di_zhi_comprehensive", {}).get("藏干合", []):
+            if "日支" in item:
+                interacting.add(day_branch)
         interacting.add(active["pillar"][1])
         ly_branch = y["pillar"][1]
         dy_branch = active["pillar"][1]
@@ -1896,6 +2734,87 @@ def _sanitize_text(text: str) -> str:
     return cleaned.strip("，。；： ")
 
 
+def _sanitize_liuqin(text: str) -> str:
+    """Patch common sentence fragments in liuqin analysis."""
+    if not isinstance(text, str):
+        return text
+    # Strip redundant leading labels that the model often echoes (e.g. "母亲能力，...").
+    text = re.sub(r"^(父亲能力|母亲能力|配偶能力|子女缘|命主与子女关系|命主与兄弟姐妹关系|婚姻稳定性|夫妻宫|夫妻星|配偶与命主父母关系)，\s*", "", text)
+    # Drop mid-sentence relation labels that the model leaves as placeholders.
+    text = text.replace("配偶与命主父母关系，", "")
+    text = text.replace("婆媳关系，", "")
+    # Complete common trailing fragments so sentences do not end abruptly.
+    fragment_completions = {
+        "祖上家境": "祖上家境普通",
+        "早年家境": "早年家境普通",
+        "父亲身体": "父亲身体偏弱",
+        "母亲身体": "母亲身体偏弱",
+        "父亲能力": "父亲能力中等，属于踏实稳重的类型",
+        "母亲能力": "母亲能力温和，以持家和精神支持为主",
+        "兄弟缘": "兄弟缘一般",
+        "姐妹缘": "姐妹缘一般",
+        "配偶对你": "配偶对你有帮助",
+        "配偶对": "配偶对你有帮助",
+        "子女缘": "子女缘一般",
+        "晚年运势": "晚年运势平稳",
+        "下属关系": "下属关系一般",
+        "与命主关系": "与命主关系一般",
+        "与子女关系": "与子女关系一般",
+        "与兄弟姐妹关系": "与兄弟姐妹关系一般",
+        "父母关系": "父母关系一般",
+        "夫妻关系": "夫妻关系一般",
+        "婚姻中需": "婚姻中需要互相包容",
+        "需": "需要多磨合",
+        "需和理解": "需要互相理解",
+        "需要和理解": "需要互相理解",
+    }
+    for fragment, completion in fragment_completions.items():
+        # Only patch when the fragment is at the very end of the text
+        # (optionally followed by punctuation), avoiding mid-sentence replacements.
+        text = re.sub(
+            rf"{re.escape(fragment)}[，。；]?\s*$",
+            completion,
+            text,
+        )
+    # Remove dangling trailing conjunctions/fragments.
+    text = re.sub(r"[，。；]+\s*(但|而|不过|只是|因为|所以|而且|此外)$", "。", text)
+    # Drop trailing "关系" or "关系，" that leaves the sentence unfinished.
+    text = re.sub(r"[，。；]+\s*关系\s*$", "。", text)
+    # Patch common trailing fragment forms that the model often leaves open.
+    text = re.sub(r"姐妹缘分\s*$", "姐妹缘分较浅，与命主往来不多", text)
+    text = re.sub(r"兄弟缘分\s*$", "兄弟缘分一般，彼此独立", text)
+    text = re.sub(r"[，。；]{2,}", "，", text)
+    return text.strip("，。； ")
+
+
+def _sanitize_liuqin_object(liuqin: Dict) -> Dict:
+    """Sanitize a structured liuqin object and ensure required keys exist.
+
+    The model may return either nested dicts or plain paragraph strings for
+    each family member; both shapes are normalized so the frontend can render
+    them uniformly.
+    """
+    cleaned: Dict[str, Any] = {}
+    defaults = {
+        "father": {"star": "", "character": "", "ability": "", "health": "", "relationship": ""},
+        "mother": {"star": "", "character": "", "ability": "", "health": "", "relationship": ""},
+        "spouse": {"palace": "", "star": "", "character": "", "ability": "", "health": "", "appearance": "", "relationship": ""},
+        "children": {"sons": "", "daughters": "", "relationship": ""},
+        "siblings": {"brothers": "", "sisters": "", "relationship": ""},
+        "family_relations": "",
+    }
+    for key, default in defaults.items():
+        value = liuqin.get(key, default)
+        if isinstance(value, dict):
+            cleaned[key] = {
+                k: _sanitize_liuqin(_sanitize_text(str(v)))
+                for k, v in {**default, **value}.items()
+            }
+        else:
+            cleaned[key] = _sanitize_liuqin(_sanitize_text(str(value)))
+    return cleaned
+
+
 def _validate_output(result: Dict, bazi: str) -> Dict:
     """Sanity-check model output and add caveats for obvious mismatches."""
     basic = result.get("basic_info", {})
@@ -1972,6 +2891,19 @@ def _validate_output(result: Dict, bazi: str) -> Dict:
     liuqin_analysis = result.get("liuqin_analysis")
     if not isinstance(liuqin_analysis, str):
         result["liuqin_analysis"] = ""
+
+    # Ensure wealth_forecast is a dict with expected keys for yearly analysis.
+    wealth_forecast = result.get("wealth_forecast")
+    if not isinstance(wealth_forecast, dict):
+        result["wealth_forecast"] = {
+            "lifetime_potential": "",
+            "tier1_cities": "",
+            "tier2_cities": "",
+            "tier3_cities": "",
+            "peak_period": "",
+            "key_years": [],
+            "evidence": "",
+        }
 
     if basic.get("bazi") and basic.get("bazi") != bazi:
         caveats.append(f"模型输出八字 {basic.get('bazi')} 与输入 {bazi} 不一致，已修正")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Structural bazi analysis helpers (10-gods, combinations, clashes, etc.)."""
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from tools.bazi_ai.bazi_validator import extract_pillars
 
@@ -71,6 +71,22 @@ _DI_ZHI_XING = {
     ("亥", "亥"): "自刑",
 }
 
+# 地支三合局（每行为一行，第三个是该局五行）
+_DI_ZHI_SAN_HE = {
+    ("申", "子", "辰"): "水",
+    ("寅", "午", "戌"): "火",
+    ("亥", "卯", "未"): "木",
+    ("巳", "酉", "丑"): "金",
+}
+
+# 地支三会局
+_DI_ZHI_SAN_HUI = {
+    ("寅", "卯", "辰"): "木",
+    ("巳", "午", "未"): "火",
+    ("申", "酉", "戌"): "金",
+    ("亥", "子", "丑"): "水",
+}
+
 # 空亡：按日柱干支查（简化表，每旬两个地支）
 _KONG_WANG = {
     "甲子": ("戌", "亥"), "甲戌": ("申", "酉"), "甲申": ("午", "未"),
@@ -97,6 +113,44 @@ _KONG_WANG = {
 
 _STEM_LABELS = ["年干", "月干", "日干", "时干"]
 _BRANCH_LABELS = ["年支", "月支", "日支", "时支"]
+
+# 地支藏干（本气/中气/余气）
+_BRANCH_HIDDEN_STEMS: Dict[str, List[str]] = {
+    "子": ["癸"],
+    "丑": ["己", "癸", "辛"],
+    "寅": ["甲", "丙", "戊"],
+    "卯": ["乙"],
+    "辰": ["戊", "乙", "癸"],
+    "巳": ["丙", "戊", "庚"],
+    "午": ["丁", "己"],
+    "未": ["己", "丁", "乙"],
+    "申": ["庚", "壬", "戊"],
+    "酉": ["辛"],
+    "戌": ["戊", "辛", "丁"],
+    "亥": ["壬", "甲"],
+}
+
+# 六亲十神定位（gender: male/female）
+_LIUQIN_STARS = {
+    "male": {
+        "father": "偏财",
+        "mother": "正印",
+        "spouse": "正财",
+        "son": "七杀",
+        "daughter": "正官",
+        "brother": "比肩",
+        "sister": "劫财",
+    },
+    "female": {
+        "father": "偏财",
+        "mother": "正印",
+        "spouse": "正官",
+        "son": "食神",
+        "daughter": "伤官",
+        "brother": "比肩",
+        "sister": "劫财",
+    },
+}
 
 
 def _find_key(mapping: Dict[str, str], value: str) -> str:
@@ -193,6 +247,168 @@ def _di_zhi_interactions(
     return result
 
 
+def _di_zhi_san_he(
+    branches: List[str],
+    labels: Optional[List[str]] = None,
+) -> List[Tuple[str, ...]]:
+    """Find 三合局/半合局 among branches. Returns tuples of (labels..., type, element)."""
+    if labels is None:
+        labels = _BRANCH_LABELS
+    result = []
+    # Full 三合局
+    for triplet, element in _DI_ZHI_SAN_HE.items():
+        indices = []
+        for b in triplet:
+            if b in branches:
+                idx = branches.index(b)
+                # Avoid duplicate index if same branch appears twice
+                if idx in indices:
+                    alt = [i for i, x in enumerate(branches) if x == b and i not in indices]
+                    if alt:
+                        idx = alt[0]
+                indices.append(idx)
+        if len(set(indices)) == 3:
+            result.append((labels[indices[0]], labels[indices[1]], labels[indices[2]], f"三合{element}局", element))
+    # 半合局（三合中任意两个）
+    for triplet, element in _DI_ZHI_SAN_HE.items():
+        for pair in [(triplet[0], triplet[1]), (triplet[1], triplet[2])]:
+            if pair[0] in branches and pair[1] in branches:
+                idx1 = branches.index(pair[0])
+                idx2 = branches.index(pair[1])
+                # Check not already part of a full 三合局
+                third = triplet[2] if pair == (triplet[0], triplet[1]) else triplet[0]
+                if third not in branches:
+                    result.append((labels[idx1], labels[idx2], f"半合{element}局", element))
+    return result
+
+
+def _di_zhi_san_hui(
+    branches: List[str],
+    labels: Optional[List[str]] = None,
+) -> List[Tuple[str, ...]]:
+    """Find 三会局 among branches."""
+    if labels is None:
+        labels = _BRANCH_LABELS
+    result = []
+    for triplet, element in _DI_ZHI_SAN_HUI.items():
+        indices = []
+        for b in triplet:
+            if b in branches:
+                idx = branches.index(b)
+                if idx in indices:
+                    alt = [i for i, x in enumerate(branches) if x == b and i not in indices]
+                    if alt:
+                        idx = alt[0]
+                indices.append(idx)
+        if len(set(indices)) == 3:
+            result.append((labels[indices[0]], labels[indices[1]], labels[indices[2]], f"三会{element}局", element))
+    return result
+
+
+def _hidden_stem_interactions(
+    branches: List[str],
+    labels: Optional[List[str]] = None,
+) -> List[Tuple[str, str, str, str, str]]:
+    """Find interactions among hidden stems of branches.
+
+    Returns tuples of (branch_label1, hidden_stem1, branch_label2, hidden_stem2, relation).
+    """
+    if labels is None:
+        labels = _BRANCH_LABELS
+    result = []
+    n = len(branches)
+    for i in range(n):
+        for j in range(i + 1, n):
+            b1, b2 = branches[i], branches[j]
+            l1, l2 = labels[i], labels[j]
+            hidden1 = _BRANCH_HIDDEN_STEMS.get(b1, [])
+            hidden2 = _BRANCH_HIDDEN_STEMS.get(b2, [])
+            for h1 in hidden1:
+                for h2 in hidden2:
+                    pair = (h1, h2)
+                    rev = (h2, h1)
+                    if pair in _TIAN_GAN_HE or rev in _TIAN_GAN_HE:
+                        he_result = _TIAN_GAN_HE.get(pair) or _TIAN_GAN_HE.get(rev)
+                        result.append((l1, h1, l2, h2, f"天干五合（化{he_result}）"))
+                    # 生克关系可扩展，此处先记录合
+    return result
+
+
+def comprehensive_di_zhi_relations(
+    branches: List[str],
+    labels: Optional[List[str]] = None,
+) -> Dict[str, List[Tuple]]:
+    """Return comprehensive branch relations including 六合/冲/害/刑/三合/半合/三会/藏干合.
+
+    Also annotates 冲合互解：若某合被冲，则标记为"合被冲解"；若某冲被合，则标记为"冲被合解"。
+    """
+    if labels is None:
+        labels = _BRANCH_LABELS
+
+    liu_he = []
+    chong = []
+    hai = []
+    xing = []
+    san_he = _di_zhi_san_he(branches, labels)
+    san_hui = _di_zhi_san_hui(branches, labels)
+    hidden_he = _hidden_stem_interactions(branches, labels)
+
+    n = len(branches)
+    he_pairs: Dict[Tuple[int, int], str] = {}
+    chong_pairs: Dict[Tuple[int, int], str] = {}
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            b1, b2 = branches[i], branches[j]
+            l1, l2 = labels[i], labels[j]
+            pair = (b1, b2)
+            rev = (b2, b1)
+
+            if pair in _DI_ZHI_LIU_HE or rev in _DI_ZHI_LIU_HE:
+                he_element = _DI_ZHI_LIU_HE.get(pair) or _DI_ZHI_LIU_HE.get(rev, "")
+                he_pairs[(i, j)] = he_element
+                liu_he.append((l1, l2, "六合", he_element))
+
+            if pair in _DI_ZHI_CHONG or rev in _DI_ZHI_CHONG:
+                chong_pairs[(i, j)] = ""
+                chong.append((l1, l2, "六冲", ""))
+
+            if pair in _DI_ZHI_HAI or rev in _DI_ZHI_HAI:
+                hai.append((l1, l2, "六害", ""))
+
+            if pair in _DI_ZHI_XING:
+                xing.append((l1, l2, "刑", _DI_ZHI_XING[pair]))
+            elif rev in _DI_ZHI_XING:
+                xing.append((l1, l2, "刑", _DI_ZHI_XING[rev]))
+
+    # Annotate 冲合互解
+    resolved: List[Tuple[str, str, str, str]] = []
+    for (i, j), he_element in he_pairs.items():
+        # Check if either branch is involved in a 冲 with a third branch
+        for (ci, cj) in chong_pairs:
+            if (i in (ci, cj) or j in (ci, cj)) and not (i in (ci, cj) and j in (ci, cj)):
+                resolved.append((labels[i], labels[j], "合被冲解", "六合被六冲破坏"))
+                break
+
+    for (i, j), _ in chong_pairs.items():
+        # Check if either branch is involved in a 合 with a third branch
+        for (hi, hj), he_element in he_pairs.items():
+            if (i in (hi, hj) or j in (hi, hj)) and not (i in (hi, hj) and j in (hi, hj)):
+                resolved.append((labels[i], labels[j], "冲被合解", "六冲被六合牵制"))
+                break
+
+    return {
+        "六合": liu_he,
+        "六冲": chong,
+        "六害": hai,
+        "刑": xing,
+        "三合": san_he,
+        "三会": san_hui,
+        "藏干合": hidden_he,
+        "冲合互解": resolved,
+    }
+
+
 def kong_wang(day_pillar: str) -> Tuple[str, str]:
     return _KONG_WANG.get(day_pillar, ("", ""))
 
@@ -264,11 +480,41 @@ def structural_profile(bazi: str) -> Optional[Dict]:
     # Build text descriptions of structural relations
     tg_he = _tian_gan_he(stems)
     dz_rel = _di_zhi_interactions(branches)
+    dz_comp = comprehensive_di_zhi_relations(branches)
 
     tg_he_text = "、".join(f"{a}与{b}合化{c}" for a, b, c in tg_he) or "无"
     dz_rel_text = "、".join(
         f"{a}与{b}{t}" + (f"（化{c}）" if c else "") for a, b, t, c in dz_rel
     ) or "无"
+
+    def _format_comp_rel(name: str, items: List[Tuple]) -> str:
+        if not items:
+            return ""
+        parts = []
+        for item in items:
+            if name == "三合":
+                if len(item) == 5:
+                    parts.append(f"{item[0]}、{item[1]}、{item[2]}{item[3]}（化{item[4]}）")
+                else:
+                    # 半合局为 4 元组
+                    parts.append(f"{item[0]}与{item[1]}{item[2]}（化{item[3]}）")
+            elif name == "三会":
+                parts.append(f"{item[0]}、{item[1]}、{item[2]}{item[3]}（化{item[4]}）")
+            elif name == "藏干合":
+                parts.append(f"{item[0]}藏{item[1]}与{item[2]}藏{item[3]}{item[4]}")
+            elif name == "冲合互解":
+                parts.append(f"{item[0]}与{item[1]}{item[2]}（{item[3]}）")
+            else:
+                element = item[3] if len(item) > 3 else ""
+                parts.append(f"{item[0]}与{item[1]}{item[2]}" + (f"（化{element}）" if element else ""))
+        return f"{name}：" + "、".join(parts)
+
+    dz_comp_texts = []
+    for name in ["六合", "六冲", "六害", "刑", "三合", "三会", "藏干合", "冲合互解"]:
+        text = _format_comp_rel(name, dz_comp.get(name, []))
+        if text:
+            dz_comp_texts.append(text)
+    dz_comp_text = "\n".join(dz_comp_texts) if dz_comp_texts else "无特殊组合"
 
     kw = kong_wang(day)
 
@@ -308,11 +554,254 @@ def structural_profile(bazi: str) -> Optional[Dict]:
         "tian_gan_he_text": tg_he_text,
         "di_zhi_relations": dz_rel,
         "di_zhi_relations_text": dz_rel_text,
+        "di_zhi_comprehensive": dz_comp,
+        "di_zhi_comprehensive_text": dz_comp_text,
         "kong_wang": f"{kw[0]}{kw[1]}" if kw[0] else "",
         "palace_text": palace_text,
         "palace_map": {label: palace_map[label] for label in _BRANCH_LABELS},
         "liuqin_text": liuqin_text,
     }
+
+
+def wealth_power_resource_flow(bazi: str) -> Optional[Dict]:
+    """Detect 财->杀->印->身 circulation that transforms pressure into support.
+
+    For a wood day master this is 土（财）-> 金（杀）-> 水（印）-> 木（身）.
+    If present, the chart's wealth potential is much higher than simple
+    "weak body, strong wealth" would suggest.
+    """
+    profile = structural_profile(bazi)
+    if profile is None:
+        return None
+
+    dm = profile["day_master"]
+    dm_el = _ELEMENT[dm]
+    # 十神对应的五行（相对日主）：
+    # 财 = 我克者；官杀 = 克我者；印 = 生我者；食伤 = 我生者；比劫 = 同我者
+    wealth_el = _RESTRAINING.get(dm_el)           # 我克者为财
+    power_el = _find_key(_RESTRAINING, dm_el)     # 克我者为官杀
+    resource_el = _find_key(_GENERATING, dm_el)   # 生我者为印
+
+    if not all((wealth_el, power_el, resource_el)):
+        return None
+
+    # Collect elements present in stems and branches (including hidden).
+    present_elements: set = set()
+    stems = profile["stems"]
+    branches = profile["branches"]
+    for s in stems:
+        present_elements.add(_ELEMENT[s])
+    for b in branches:
+        present_elements.add(_ELEMENT[b])
+        for h in _BRANCH_HIDDEN_STEMS.get(b, []):
+            present_elements.add(_ELEMENT[h])
+
+    has_wealth = wealth_el in present_elements
+    has_power = power_el in present_elements
+    has_resource = resource_el in present_elements
+    has_self = dm_el in present_elements  # always true
+
+    # Check direct stem link: does a wealth stem sit next to power stem, etc.
+    def _link_exists(src_el: str, dst_el: str) -> bool:
+        """Return True if any src element stem/branch generates dst element nearby."""
+        # Simplified: check if both elements are present in the chart.
+        return src_el in present_elements and dst_el in present_elements
+
+    flow_complete = has_wealth and has_power and has_resource and has_self
+    flow_links = (
+        _link_exists(wealth_el, power_el)
+        and _link_exists(power_el, resource_el)
+        and _link_exists(resource_el, dm_el)
+    )
+
+    if not (flow_complete and flow_links):
+        return None
+
+    # Describe the flow in terms of 10-gods.
+    def _el_name(el: str) -> str:
+        return el
+
+    # For the day master element, map 10-gods.
+    # The mapping below works because we constructed wealth/power/resource by
+    # the restraining chain relative to dm_el.
+    return {
+        "exists": True,
+        "description": (
+            f"命局存在{_el_name(wealth_el)}（财）生{_el_name(power_el)}（官杀）、"
+            f"{_el_name(power_el)}（官杀）生{_el_name(resource_el)}（印）、"
+            f"{_el_name(resource_el)}（印）生{_el_name(dm_el)}（日主）的流通。"
+            "财虽旺，但能通过官杀转而生印，最终印生身，化泄财星压力，主富贵有源。"
+        ),
+        "wealth_element": wealth_el,
+        "power_element": power_el,
+        "resource_element": resource_el,
+        "self_element": dm_el,
+    }
+
+
+def _find_shishen_locations(day_master: str, pillars: List[str]) -> List[Dict]:
+    """Return all locations (stem/branch/hidden) where each 10-god appears."""
+    locations: Dict[str, List[Dict]] = {}
+    for idx, pillar in enumerate(pillars):
+        stem, branch = pillar[0], pillar[1]
+        label = _STEM_LABELS[idx]
+        ss = shishen_for_stem(day_master, stem)
+        locations.setdefault(ss, []).append({
+            "pillar": pillar,
+            "position": label,
+            "type": "天干",
+            "char": stem,
+        })
+        # branch main qi
+        ss_br = shishen_for_branch_main(day_master, branch)
+        locations.setdefault(ss_br, []).append({
+            "pillar": pillar,
+            "position": _BRANCH_LABELS[idx],
+            "type": "地支本气",
+            "char": branch,
+        })
+        # hidden stems
+        for hidden in _BRANCH_HIDDEN_STEMS.get(branch, []):
+            ss_h = shishen_for_stem(day_master, hidden)
+            locations.setdefault(ss_h, []).append({
+                "pillar": pillar,
+                "position": _BRANCH_LABELS[idx],
+                "type": "地支藏干",
+                "char": hidden,
+            })
+    return locations
+
+
+def _element_relation(day_master: str, char: str) -> str:
+    """Return 生克关系 of *char* relative to day master."""
+    dm_el = _ELEMENT[day_master]
+    ch_el = _ELEMENT[char]
+    if ch_el == dm_el:
+        return "比劫"
+    if _GENERATING[dm_el] == ch_el:
+        return "泄耗"
+    if _GENERATING[ch_el] == dm_el:
+        return "生助"
+    if _RESTRAINING[dm_el] == ch_el:
+        return "克制"
+    if _RESTRAINING[ch_el] == dm_el:
+        return "受克"
+    return "平"
+
+
+def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
+    """Return six-relations structural facts keyed by family member.
+
+    For each relation: which 10-god, where it appears (stem/branch/hidden),
+    which palace, whether supported/restrained, and a natural description.
+    """
+    profile = structural_profile(bazi)
+    if profile is None:
+        return None
+
+    day_master = profile["day_master"]
+    stems = profile["stems"]
+    branches = profile["branches"]
+    pillars = [f"{s}{b}" for s, b in zip(stems, branches)]
+
+    gender_key = "male" if gender in ("male", "男") else "female"
+    mapping = _LIUQIN_STARS[gender_key]
+    locations = _find_shishen_locations(day_master, pillars)
+
+    palace_map = {
+        "年支": "祖上/父母宫",
+        "月支": "父母/兄弟宫",
+        "日支": "夫妻宫",
+        "时支": "子女宫",
+    }
+
+    def _describe(relation: str, shishen: str) -> Dict:
+        locs = locations.get(shishen, [])
+        # Deduplicate by position+char to avoid repeats when branch main qi
+        # overlaps with hidden stem representation.
+        seen = set()
+        unique_locs = []
+        for loc in locs:
+            key = (loc["position"], loc["char"], loc["type"])
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_locs.append(loc)
+
+        # For siblings, the day master itself counts as 比肩/劫财 by definition,
+        # but it does not represent an actual sibling in the chart.
+        if relation in ("兄弟", "姐妹"):
+            unique_locs = [loc for loc in unique_locs if loc["position"] != "日干"]
+            if not unique_locs:
+                return {
+                    "star": shishen,
+                    "exists": False,
+                    "description": f"命局天干不透{shishen}，地支亦无强根，{relation}缘分淡薄或助力有限。",
+                }
+
+        if not unique_locs:
+            return {
+                "star": shishen,
+                "exists": False,
+                "description": f"命局不现{shishen}，{relation}缘薄或助力不显。",
+            }
+
+        lines = []
+        for loc in unique_locs:
+            rel = _element_relation(day_master, loc["char"])
+            palace = palace_map.get(loc["position"], "")
+            line = f"{loc['position']}{loc['char']}（{loc['type']}），与日主{rel}"
+            if palace:
+                line += f"，落在{palace}"
+            lines.append(line)
+
+        # Determine if the star has root / is supported
+        has_stem = any(loc["type"] == "天干" for loc in unique_locs)
+        has_branch_root = any(loc["type"] in ("地支本气", "地支藏干") for loc in unique_locs)
+        support_notes = []
+        if has_stem:
+            support_notes.append("透干有力")
+        if has_branch_root:
+            support_notes.append("有根")
+        support_text = "、".join(support_notes) if support_notes else "虚浮无根"
+
+        return {
+            "star": shishen,
+            "exists": True,
+            "locations": unique_locs,
+            "support_text": support_text,
+            "description": f"{relation}以{shishen}为星：" + "；".join(lines) + f"。整体{support_text}。",
+        }
+
+    result: Dict[str, Any] = {
+        "gender": gender_key,
+        "day_master": day_master,
+        "father": _describe("父亲", mapping["father"]),
+        "mother": _describe("母亲", mapping["mother"]),
+        "spouse": _describe("配偶", mapping["spouse"]),
+        "son": _describe("儿子", mapping["son"]),
+        "daughter": _describe("女儿", mapping["daughter"]),
+        "brother": _describe("兄弟", mapping["brother"]),
+        "sister": _describe("姐妹", mapping["sister"]),
+        "palace_map": palace_map,
+    }
+
+    # Special palace notes
+    result["spouse_palace"] = {
+        "branch": branches[2],
+        "shishen_main": shishen_for_branch_main(day_master, branches[2]),
+        "description": f"夫妻宫日支{branches[2]}，本气为{shishen_for_branch_main(day_master, branches[2])}，配偶气质与婚姻基调由此决定。",
+    }
+    result["parents_palace"] = {
+        "branch": branches[1],
+        "description": f"父母宫月支{branches[1]}，主原生家庭与父母关系。",
+    }
+    result["children_palace"] = {
+        "branch": branches[3],
+        "description": f"子女宫时支{branches[3]}，主子女缘分与晚年。",
+    }
+
+    return result
 
 
 def yearly_relations(
@@ -338,10 +827,40 @@ def yearly_relations(
 
     tg_he = _tian_gan_he(stems, labels=stem_labels)
     dz_rel = _di_zhi_interactions(branches, labels=branch_labels)
+    dz_comp = comprehensive_di_zhi_relations(branches, labels=branch_labels)
 
     # Filter to those involving liunian
     tg_he_ly = [x for x in tg_he if "流年干" in (x[0], x[1])]
     dz_rel_ly = [x for x in dz_rel if "流年支" in (x[0], x[1])]
+
+    def _format_comp_rel(name: str, items: List[Tuple]) -> str:
+        if not items:
+            return ""
+        parts = []
+        for item in items:
+            if name == "三合":
+                if len(item) == 5:
+                    parts.append(f"{item[0]}、{item[1]}、{item[2]}{item[3]}（化{item[4]}）")
+                else:
+                    # 半合局为 4 元组
+                    parts.append(f"{item[0]}与{item[1]}{item[2]}（化{item[3]}）")
+            elif name == "三会":
+                parts.append(f"{item[0]}、{item[1]}、{item[2]}{item[3]}（化{item[4]}）")
+            elif name == "藏干合":
+                parts.append(f"{item[0]}藏{item[1]}与{item[2]}藏{item[3]}{item[4]}")
+            elif name == "冲合互解":
+                parts.append(f"{item[0]}与{item[1]}{item[2]}（{item[3]}）")
+            else:
+                element = item[3] if len(item) > 3 else ""
+                parts.append(f"{item[0]}与{item[1]}{item[2]}" + (f"（化{element}）" if element else ""))
+        return f"{name}：" + "、".join(parts)
+
+    dz_comp_texts = []
+    for name in ["六合", "六冲", "六害", "刑", "三合", "三会", "藏干合", "冲合互解"]:
+        text = _format_comp_rel(name, dz_comp.get(name, []))
+        if text:
+            dz_comp_texts.append(text)
+    dz_comp_text = "\n".join(dz_comp_texts) if dz_comp_texts else "无特殊组合"
 
     return {
         "liunian_pillar": liunian_pillar,
@@ -356,4 +875,6 @@ def yearly_relations(
         "di_zhi_relations_text": "、".join(
             f"{a}与{b}{t}" + (f"（化{c}）" if c else "") for a, b, t, c in dz_rel_ly
         ) or "无",
+        "di_zhi_comprehensive": dz_comp,
+        "di_zhi_comprehensive_text": dz_comp_text,
     }

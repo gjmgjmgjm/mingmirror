@@ -281,14 +281,14 @@ def dayun_list(
 
     year_stem, month_pillar = pillars[0][0], pillars[1]
     birth_dt = solar_birth_datetime(birth_date, birth_time, calendar_type)
+    _male = gender in ("male", "男", "m", "M")
 
     if birth_dt is None:
         start_years, start_months = 0, 0
         forward = True
     else:
         yang = year_stem in {"甲", "丙", "戊", "庚", "壬"}
-        male = gender == "male"
-        forward = (yang and male) or (not yang and not male)
+        forward = (yang and _male) or (not yang and not _male)
         start_years, start_months = _start_age(birth_dt, forward)
 
     try:
