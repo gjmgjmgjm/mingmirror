@@ -120,6 +120,7 @@ async def _call_llm(
     model: Optional[str] = None,
     temperature: float = 0.2,
     max_tokens: int = 500,
+    timeout_seconds: float = 30.0,
 ) -> str:
     """Lightweight LLM call returning raw text."""
     key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DOUYIN_BAZI_AI_API_KEY")
@@ -146,7 +147,7 @@ async def _call_llm(
         "max_tokens": max_tokens,
     }
 
-    timeout = aiohttp.ClientTimeout(total=60)
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(
             f"{base}/chat/completions",
@@ -269,6 +270,7 @@ async def evaluate_question(
     embedding_cache_path: Optional[Path] = None,
     knowledge_embedding_cache_path: Optional[Path] = None,
     mock_answer: Optional[str] = None,
+    timeout_seconds: float = 30.0,
 ) -> Dict[str, Any]:
     """Evaluate a single BaziQA question and return prediction + metadata."""
     qid = question.get("question_id", "")
@@ -290,6 +292,7 @@ async def evaluate_question(
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
+                timeout_seconds=timeout_seconds,
             )
         else:
             context = await _build_enhanced_context(
@@ -311,6 +314,7 @@ async def evaluate_question(
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
+                timeout_seconds=timeout_seconds,
             )
     except Exception as exc:  # pragma: no cover - safety net for live API
         error = f"{type(exc).__name__}: {exc}"
@@ -361,6 +365,7 @@ async def run_evaluation(
     embedding_cache_path: Optional[Path] = None,
     knowledge_embedding_cache_path: Optional[Path] = None,
     mock_answer: Optional[str] = None,
+    timeout_seconds: float = 30.0,
 ) -> Dict[str, Any]:
     """Run BaziQA evaluation across selected datasets.
 
@@ -372,6 +377,7 @@ async def run_evaluation(
         datasets: list of dataset names to include (e.g. ["contest8", "celebrity50"]).
         output: optional path to write JSONL predictions.
         mock_answer: if set, bypass LLM and use this letter for every question.
+        timeout_seconds: per-question LLM timeout.
     """
     contest_records, celebrity_records = load_baziqa(data_dir)
     datasets = datasets or ["contest8", "celebrity50"]
@@ -423,6 +429,7 @@ async def run_evaluation(
             embedding_cache_path=embedding_cache_path,
             knowledge_embedding_cache_path=knowledge_embedding_cache_path,
             mock_answer=mock_answer,
+            timeout_seconds=timeout_seconds,
         )
         results.append(result)
         if result.get("correct"):
@@ -460,6 +467,7 @@ def main() -> None:
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
     parser.add_argument("--model", default=None, help="LLM model name")
     parser.add_argument("--mock-answer", default=None, help="Use fixed letter for every question (for testing)")
+    parser.add_argument("--timeout", type=float, default=30.0, help="Per-question LLM timeout in seconds")
     args = parser.parse_args()
 
     summary = asyncio.run(
@@ -474,6 +482,7 @@ def main() -> None:
             base_url=args.base_url,
             model=args.model,
             mock_answer=args.mock_answer,
+            timeout_seconds=args.timeout,
         )
     )
 
