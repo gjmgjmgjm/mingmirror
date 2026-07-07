@@ -138,7 +138,7 @@ export function analyzeYearly(
   birthDate: string,
   birthTime: string,
   calendarType: "solar" | "lunar" = "solar",
-  mode: "10y" | "lifetime" = "10y"
+  mode: "10y" | "20y" | "lifetime" = "10y"
 ): Promise<BaziYearlyResponse> {
   return fetchJson<BaziYearlyResponse>("/bazi/yearly", {
     method: "POST",

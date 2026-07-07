@@ -31,7 +31,24 @@ interface YearlyResult {
     health: string;
     caution: string;
   }>;
-  liuqin_analysis?: string;
+  liuqin_analysis?:
+    | string
+    | {
+        father?: { star?: string; character?: string; ability?: string; health?: string; relationship?: string };
+        mother?: { star?: string; character?: string; ability?: string; health?: string; relationship?: string };
+        spouse?: {
+          palace?: string;
+          star?: string;
+          character?: string;
+          ability?: string;
+          health?: string;
+          appearance?: string;
+          relationship?: string;
+        };
+        children?: { overview?: string; sons?: string; daughters?: string; relationship?: string };
+        siblings?: { brothers?: string; sisters?: string; relationship?: string };
+        family_relations?: string;
+      };
   milestones?: Array<{
     year: number;
     age: number;
@@ -45,7 +62,7 @@ interface YearlyResult {
 
 export default function YearlyChart() {
   const { chart } = useChart();
-  const [mode, setMode] = useState<"10y" | "lifetime">("10y");
+  const [mode, setMode] = useState<"10y" | "20y" | "lifetime">("10y");
   const [timeline, setTimeline] = useState<BaziTimelineResponse | null>(null);
   const [result, setResult] = useState<YearlyResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,12 +140,13 @@ export default function YearlyChart() {
           <div className="inline-flex rounded-xl border border-ink-300/40 bg-ink-100/50 p-1 dark:border-ink-500/40 dark:bg-ink-800/50">
             {[
               { value: "10y", label: "未来10年" },
+              { value: "20y", label: "未来20年" },
               { value: "lifetime", label: "看到80岁" },
             ].map((m) => (
               <button
                 key={m.value}
                 type="button"
-                onClick={() => setMode(m.value as "10y" | "lifetime")}
+                onClick={() => setMode(m.value as "10y" | "20y" | "lifetime")}
                 className={`rounded-lg px-4 py-1.5 text-sm transition ${
                   mode === m.value
                     ? "bg-white text-ink-800 shadow-sm dark:bg-ink-700 dark:text-ink-100"
@@ -249,20 +267,71 @@ export default function YearlyChart() {
               <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
                 六亲断语
               </h2>
-              <div className="space-y-2">
-                {result.liuqin_analysis.split("\n").map((line, idx) => {
-                  const trimmed = line.trim();
-                  if (!trimmed) return null;
-                  return (
-                    <p
-                      key={idx}
-                      className="text-ink-700 dark:text-ink-200"
-                    >
-                      {trimmed}
-                    </p>
-                  );
-                })}
-              </div>
+              {typeof result.liuqin_analysis === "string" ? (
+                <div className="space-y-2">
+                  {result.liuqin_analysis.split("\n").map((line, idx) => {
+                    const trimmed = line.trim();
+                    if (!trimmed) return null;
+                    return (
+                      <p key={idx} className="text-ink-700 dark:text-ink-200">
+                        {trimmed}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {Object.entries(result.liuqin_analysis).map(([key, value]) => {
+                    const titles: Record<string, string> = {
+                      father: "父亲",
+                      mother: "母亲",
+                      spouse: "配偶",
+                      children: "子女",
+                      siblings: "兄弟姐妹",
+                      family_relations: "六亲之间的关系",
+                    };
+                    if (!value) return null;
+                    if (typeof value === "string") {
+                      return (
+                        <div key={key}>
+                          <h3 className="mb-1 font-semibold text-ink-800 dark:text-ink-100">{titles[key] || key}</h3>
+                          <p className="whitespace-pre-line text-sm text-ink-700 dark:text-ink-200">{value}</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={key}>
+                        <h3 className="mb-1 font-semibold text-ink-800 dark:text-ink-100">{titles[key] || key}</h3>
+                        <div className="space-y-0.5">
+                          {Object.entries(value).map(([subKey, subValue]) => {
+                            if (!subValue) return null;
+                            const subTitles: Record<string, string> = {
+                              star: "星宫",
+                              palace: "夫妻宫",
+                              character: "性格",
+                              ability: "能力",
+                              health: "健康",
+                              appearance: "外貌",
+                              relationship: "与命主关系",
+                              overview: "子女总体判断",
+                              sons: "儿子",
+                              daughters: "女儿",
+                              brothers: "兄弟",
+                              sisters: "姐妹",
+                            };
+                            return (
+                              <p key={subKey} className="text-sm text-ink-700 dark:text-ink-200">
+                                <span className="font-medium">{subTitles[subKey] || subKey}：</span>
+                                {String(subValue)}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           )}
 
