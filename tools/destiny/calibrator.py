@@ -8,8 +8,10 @@ adjusted system weights.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from tools.destiny.contract import ChartInfo
@@ -117,6 +119,52 @@ class InMemoryEventStore:
                 events.pop(idx)
                 return True
         return False
+
+
+class JsonlEventStore(InMemoryEventStore):
+    """Persistent event store backed by a JSONL file.
+
+    Loads all events on init and flushes every change to disk.
+    """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._load()
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            with self._path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    event = LifeEvent(**data)
+                    self._events.setdefault(event.chart_id, []).append(event)
+        except (json.JSONDecodeError, OSError):  # pragma: no cover - safety net
+            pass
+
+    def _flush(self) -> None:
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            for events in self._events.values():
+                for event in events:
+                    f.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
+        tmp_path.replace(self._path)
+
+    def add(self, event: LifeEvent) -> None:
+        super().add(event)
+        self._flush()
+
+    def delete(self, chart_id: str, event_id: str) -> bool:
+        result = super().delete(chart_id, event_id)
+        if result:
+            self._flush()
+        return result
 
 
 def _extract_year(happened_at: str) -> Optional[int]:

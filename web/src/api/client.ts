@@ -390,3 +390,71 @@ export function fetchDestinyScript(
     body: JSON.stringify(payload),
   });
 }
+
+export interface LifeEvent {
+  id: string;
+  chart_id: string;
+  event_type: string;
+  happened_at: string;
+  description: string;
+}
+
+export type EventType =
+  | "study"
+  | "job"
+  | "job_change"
+  | "startup"
+  | "marriage"
+  | "breakup"
+  | "house"
+  | "illness"
+  | "surgery"
+  | "award"
+  | "move"
+  | "other";
+
+export interface CreateEventRequest {
+  event_type: EventType;
+  happened_at: string;
+  description: string;
+}
+
+export function listEvents(chartId: string): Promise<LifeEvent[]> {
+  return fetchJson<LifeEvent[]>(`/charts/${encodeURIComponent(chartId)}/events`);
+}
+
+export function createEvent(
+  chartId: string,
+  payload: CreateEventRequest
+): Promise<LifeEvent> {
+  return fetchJson<LifeEvent>(`/charts/${encodeURIComponent(chartId)}/events`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface CalibrationEventDetail {
+  event_id: string;
+  event_type: string;
+  happened_at: string;
+  domain: string;
+  scores: Record<string, number>;
+  snippets: Record<string, string>;
+}
+
+export interface CalibrationResponse {
+  chart_id: string;
+  event_count: number;
+  average_score: number;
+  system_scores: Record<string, number>;
+  adjusted_weights: Record<string, number>;
+  suggested_hour_offset?: number;
+  events: CalibrationEventDetail[];
+}
+
+export function calibrateChart(chartId: string): Promise<CalibrationResponse> {
+  return fetchJson<CalibrationResponse>(
+    `/charts/${encodeURIComponent(chartId)}/calibrate`,
+    { method: "POST" }
+  );
+}

@@ -9,6 +9,7 @@ import Calendar from "./pages/Calendar";
 import Qizheng from "./pages/Qizheng";
 import QizhengYearly from "./pages/QizhengYearly";
 import Script from "./pages/Script";
+import Events from "./pages/Events";
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
           <Route path="/sandbox" element={<Sandbox />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/script" element={<Script />} />
+          <Route path="/events" element={<Events />} />
         </Routes>
       </Layout>
     </ChartProvider>

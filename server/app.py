@@ -856,11 +856,14 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         return _analyzer
 
-    # Event calibration storage (in-memory, per-process).
+    # Event calibration storage (persistent JSONL by default).
     try:
-        from tools.destiny.calibrator import DestinyCalibrator, InMemoryEventStore
+        from tools.destiny.calibrator import DestinyCalibrator, JsonlEventStore
 
-        _event_store = InMemoryEventStore()
+        _download_path = Path(config.get("path", "./Downloaded"))
+        _event_store_path = Path(config.get("event_store_path", _download_path / "events.jsonl"))
+        _event_store_path.parent.mkdir(parents=True, exist_ok=True)
+        _event_store = JsonlEventStore(_event_store_path)
         _calibrator = DestinyCalibrator(
             analyzer=_build_calibration_analyzer(),
             event_store=_event_store,

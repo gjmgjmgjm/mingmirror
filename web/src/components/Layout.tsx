@@ -7,6 +7,7 @@ import {
   FlaskConical,
   CalendarDays,
   BookOpen,
+  Target,
   Sun,
   Moon,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const navItems = [
   { path: "/sandbox", label: "沙盒", icon: FlaskConical },
   { path: "/calendar", label: "择日", icon: CalendarDays },
   { path: "/script", label: "剧本", icon: BookOpen },
+  { path: "/events", label: "校准", icon: Target },
 ];
 
 export default function Layout({ children }: LayoutProps) {
