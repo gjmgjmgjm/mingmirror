@@ -186,6 +186,7 @@ async def _build_enhanced_context(
     knowledge_base_path: Optional[Path] = None,
     embedding_cache_path: Optional[Path] = None,
     knowledge_embedding_cache_path: Optional[Path] = None,
+    extra_cases_paths: Optional[List[Path]] = None,
     top_k: int = 3,
 ) -> str:
     """Build the same enrichment used by the production engine."""
@@ -195,6 +196,7 @@ async def _build_enhanced_context(
         cases_path or Path("./bazi_knowledge/cases.jsonl"),
         top_k=top_k,
         embedding_cache_path=embedding_cache_path,
+        extra_cases_paths=extra_cases_paths,
     )
 
     knowledge_paths = [Path("./bazi_knowledge/rule_primer.md")]
@@ -277,6 +279,7 @@ async def evaluate_question(
     knowledge_embedding_cache_path: Optional[Path] = None,
     mock_answer: Optional[str] = None,
     timeout_seconds: float = 30.0,
+    extra_cases_paths: Optional[List[Path]] = None,
 ) -> Dict[str, Any]:
     """Evaluate a single BaziQA question and return prediction + metadata."""
     qid = question.get("question_id", "")
@@ -311,6 +314,7 @@ async def evaluate_question(
                 knowledge_base_path=knowledge_base_path,
                 embedding_cache_path=embedding_cache_path,
                 knowledge_embedding_cache_path=knowledge_embedding_cache_path,
+                extra_cases_paths=extra_cases_paths,
             )
             system_prompt = "你是一位精通中国传统八字命理的命理师。"
             user_prompt = await _build_enhanced_prompt(bazi, qtext, options, context)
@@ -372,6 +376,7 @@ async def run_evaluation(
     knowledge_embedding_cache_path: Optional[Path] = None,
     mock_answer: Optional[str] = None,
     timeout_seconds: float = 30.0,
+    extra_cases_paths: Optional[List[Path]] = None,
 ) -> Dict[str, Any]:
     """Run BaziQA evaluation across selected datasets.
 
@@ -384,6 +389,7 @@ async def run_evaluation(
         output: optional path to write JSONL predictions.
         mock_answer: if set, bypass LLM and use this letter for every question.
         timeout_seconds: per-question LLM timeout.
+        extra_cases_paths: additional case files for RAG enrichment.
     """
     contest_records, celebrity_records = load_baziqa(data_dir)
     datasets = datasets or ["contest8", "celebrity50"]
@@ -436,6 +442,7 @@ async def run_evaluation(
             knowledge_embedding_cache_path=knowledge_embedding_cache_path,
             mock_answer=mock_answer,
             timeout_seconds=timeout_seconds,
+            extra_cases_paths=extra_cases_paths,
         )
         results.append(result)
         if result.get("correct"):
