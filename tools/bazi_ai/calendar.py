@@ -156,10 +156,29 @@ def pillars_for_date(d: date) -> Dict[str, str]:
     }
 
 
+# 子时（23:00-24:00）日柱取次日的 convention toggle.
+# False = 早子时仍属当日（日柱不变，日界在 00:00）；
+# True（默认）= 日柱在 23:00 子时即进入次日（与 iztro / MingLi-Bench / 多数现代排盘一致）。
+# 两种各有命理依据；默认采用 True，与赛事 gold 及主流排盘对齐。
+# 历史：曾默认 False（保守当日），validate_chart ruler 发现该默认与 iztro/MingLi
+# 在所有子时命例上系统性分歧（如 case_9 23:15、case_28 23:34），故改为 True。
+_ZI_HOUR_NEXT_DAY = True
+
+
+def set_zi_hour_next_day(enabled: bool) -> None:
+    global _ZI_HOUR_NEXT_DAY
+    _ZI_HOUR_NEXT_DAY = bool(enabled)
+
+
 def pillars_for_datetime(dt: datetime) -> Dict[str, str]:
     """Return year/month/day/hour pillars for a Gregorian datetime."""
+    d = dt.date()
+    if _ZI_HOUR_NEXT_DAY and dt.hour >= 23:
+        from datetime import timedelta
+
+        d = d + timedelta(days=1)  # 子时归次日：日/月/年柱按次日重算
     return {
-        **pillars_for_date(dt.date()),
+        **pillars_for_date(d),
         "hour": hour_pillar(dt),
     }
 
