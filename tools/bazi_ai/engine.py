@@ -21,7 +21,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import aiofiles
 
@@ -59,11 +59,13 @@ _SIX_CHONG = {
 
 # Domain keywords used to boost retrieval when the user asks a domain question.
 _DOMAIN_KEYWORDS = {
-    "career": ["事业", "工作", "职业", "创业", "上班", "行业", "升迁", "贵人"],
-    "wealth": ["财", "钱", "富", "收入", "资产", "赚钱", "百万", "千万", "小康"],
+    "career": ["事业", "工作", "职业", "创业", "上班", "行业", "升迁", "贵人", "从事", "职位"],
+    "wealth": ["财", "钱", "富", "收入", "资产", "赚钱", "百万", "千万", "小康", "贫富"],
     "marriage": ["婚姻", "感情", "桃花", "老公", "老婆", "配偶", "恋爱", "结婚", "离婚"],
-    "health": ["健康", "病", "身体", "手术", "肾", "妇科", "心脏", "血液", "子宫"],
+    "health": ["健康", "病", "身体", "手术", "肾", "妇科", "心脏", "血液", "子宫", "困扰"],
     "family": ["父母", "父亲", "母亲", "子女", "孩子", "兄弟", "姐妹"],
+    "kinship": ["父母", "父亲", "母亲", "子女", "孩子", "兄弟", "姐妹", "六亲"],
+    "education": ["学历", "读书", "学业", "毕业", "学校", "大学", "文凭"],
 }
 
 
@@ -94,8 +96,15 @@ def _detect_question_domains(question: str) -> List[str]:
     return domains
 
 
-def _case_relevance(case: Dict, bazi: str, question: str) -> int:
-    """Keyword relevance score for RAG, with domain-aware boosts."""
+def _case_relevance(
+    case: Dict, bazi: str, question: str, *, boost_domains: Optional[List[str]] = None
+) -> int:
+    """Keyword relevance score for RAG, with domain-aware boosts.
+
+    Important (2026-07-13): exact-bazi matches from a *different domain* must not
+    dominate retrieval.  LOO probes showed career questions retrieving the same
+    person's marriage/children Qs (bazi +100) and drowning domain-similar cases.
+    """
     score = 0
     text = " ".join(
         [
@@ -105,11 +114,22 @@ def _case_relevance(case: Dict, bazi: str, question: str) -> int:
             " ".join(case.get("conclusions", [])),
         ]
     )
-    case_domains = case.get("domains", {})
+    case_domains = case.get("domains", {}) or {}
+    case_domain_keys = set(case_domains.keys())
 
-    # Exact bazi match is the strongest signal.
+    query_domains = _detect_question_domains(question)
+    if boost_domains:
+        query_domains = list(set(query_domains) | set(boost_domains))
+    query_domain_set = set(query_domains)
+    domain_overlap = bool(query_domain_set & case_domain_keys) if query_domain_set else False
+
+    # Exact bazi: strong only when domain aligns (or query has no domain).
     if case.get("bazi") == bazi:
-        score += 100
+        if not query_domain_set or domain_overlap:
+            score += 80
+        else:
+            # Same chart, wrong domain — still a mild signal, not a nuke.
+            score += 15
 
     # Structural similarity.
     query_pillars = bazi.split()
@@ -124,14 +144,24 @@ def _case_relevance(case: Dict, bazi: str, question: str) -> int:
         if query_pillars[3][1] == case_pillars[3][1]:  # hour branch
             score += 5
 
-    # Domain-aware boost: if the user asks about career, prefer career cases.
-    for domain in _detect_question_domains(question):
+    # Domain-aware boost: same-domain cases beat cross-domain same-bazi noise.
+    for domain in query_domains:
         if case_domains.get(domain):
-            score += 12
+            score += 35  # was 12 — domain match is the main transfer signal
         domain_text = " ".join(case_domains.get(domain, []))
         for kw in _DOMAIN_KEYWORDS.get(domain, []):
             if kw in domain_text or kw in text:
                 score += 3
+
+    # Extra soft boost for explicitly boosted domains.
+    if boost_domains:
+        for domain in boost_domains:
+            if case_domains.get(domain):
+                score += 15  # was 8
+
+    # Penalty when query has a clear domain but case is only in other domains.
+    if query_domain_set and case_domain_keys and not domain_overlap:
+        score -= 20
 
     # Question keyword overlap.
     if question:
@@ -139,6 +169,10 @@ def _case_relevance(case: Dict, bazi: str, question: str) -> int:
             kw = kw.strip()
             if len(kw) >= 2 and kw in text:
                 score += 10
+
+    # Prefer cases that explicitly state the gold answer (BaziQA reverse cases).
+    if "正确答案" in text or "答案：" in text:
+        score += 5
     return score
 
 
@@ -149,6 +183,9 @@ async def retrieve_similar_cases(
     top_k: int = 3,
     embedding_cache_path: Optional[Path] = None,
     extra_cases_paths: Optional[List[Path]] = None,
+    exclude_case_matcher: Optional[Callable[[Dict], bool]] = None,
+    domain_filter: Optional[List[str]] = None,
+    domain_boost: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Return the top-k most relevant cases.
 
@@ -157,40 +194,85 @@ async def retrieve_similar_cases(
 
     *extra_cases_paths* allows users to load additional private/local case
     databases without mixing them into the default public case file.
+
+    *exclude_case_matcher* is an optional predicate. Any case for which it
+    returns ``True`` is removed from retrieval, which is useful for leave-one-out
+    or cross-domain benchmarks where the target case must not leak into RAG.
+
+    *domain_filter* restricts retrieval to cases whose ``domains`` keys overlap
+    with the supplied list. When fewer than *top_k* domain cases are available,
+    the remainder is filled from the general ranking.
+
+    *domain_boost* is a softer alternative: cases whose ``domains`` overlap with
+    the supplied list receive an extra score bump, but cases from other domains
+    are still allowed to rank higher if they are structurally very similar.
     """
     cases = await _load_cases(cases_path)
     for path in extra_cases_paths or []:
         cases.extend(await _load_cases(path))
+    if exclude_case_matcher:
+        cases = [c for c in cases if not exclude_case_matcher(c)]
     if not cases:
         return []
 
-    embedding_bonus: Dict[int, float] = {}
+    if domain_filter:
+        domain_set = set(domain_filter)
 
-    if embedding_cache_path is not None and embedding_cache_path.exists():
-        store = EmbeddingStore()
-        if store.load_cache(embedding_cache_path):
-            query = f"{bazi}\n{question}".strip()
-            for rank, (case, score) in enumerate(store.search(query, top_k=min(len(cases), top_k * 3))):
-                for idx, c in enumerate(cases):
-                    if c is case:
-                        # Normalize score to a 0-30 bonus and decay by rank.
-                        embedding_bonus[idx] = max(0.0, score * 30 - rank * 3)
-                        break
+        def _has_domain(case: Dict) -> bool:
+            case_domains = case.get("domains", {})
+            if not case_domains:
+                return False
+            return not domain_set.isdisjoint(case_domains.keys())
 
-    scored = []
-    for idx, case in enumerate(cases):
-        keyword_score = _case_relevance(case, bazi, question)
-        bonus = embedding_bonus.get(idx, 0.0)
-        scored.append((keyword_score + bonus, case))
+        domain_cases = [c for c in cases if _has_domain(c)]
+    else:
+        domain_cases = cases
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [c for _, c in scored[:top_k]]
+    def _rank(active_cases: List[Dict]) -> List[Dict]:
+        """Return *active_cases* ranked by keyword + optional embedding score."""
+        bonus: Dict[int, float] = {}
+        if embedding_cache_path is not None and embedding_cache_path.exists():
+            store = EmbeddingStore()
+            if store.load_cache(embedding_cache_path):
+                query = f"{bazi}\n{question}".strip()
+                for rank, (case, score) in enumerate(
+                    store.search(query, top_k=min(len(active_cases), top_k * 3))
+                ):
+                    for idx, c in enumerate(active_cases):
+                        if c is case:
+                            bonus[idx] = max(0.0, score * 30 - rank * 3)
+                            break
+
+        scored = []
+        for idx, case in enumerate(active_cases):
+            keyword_score = _case_relevance(
+                case, bazi, question, boost_domains=domain_boost
+            )
+            emb_bonus = bonus.get(idx, 0.0)
+            scored.append((keyword_score + emb_bonus, case))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _, c in scored]
+
+    ranked = _rank(domain_cases)
+    if domain_filter:
+        domain_ids = {id(c) for c in domain_cases}
+        other_cases = [c for c in cases if id(c) not in domain_ids]
+        other_ranked = _rank(other_cases)
+        ranked = ranked[:top_k] + other_ranked[: max(0, top_k - len(ranked))]
+
+    return ranked[:top_k]
 
 
 async def _build_rule_primer(
-    knowledge_base_paths: List[Path], max_chars: int = 10000
+    knowledge_base_paths: List[Path], max_chars: int = 40000
 ) -> str:
-    """Load a short rule primer from one or more knowledge base files."""
+    """Load a rule primer from one or more knowledge base files.
+
+    Default 40000 chars (~13K tokens) fits the 盲派 rulebook + mnemonics in a
+    long-context model (DeepSeek/Qwen). The previous 10000-char cap silently
+    truncated most of the 盲派 knowledge — see docs/bazi_ai_error_analysis.md.
+    """
     if isinstance(knowledge_base_paths, Path):
         knowledge_base_paths = [knowledge_base_paths]
     parts = []
@@ -222,9 +304,10 @@ def _build_system_prompt(knowledge_context: str) -> str:
 10. 输出必须是 JSON，不要有任何额外解释文字。
 
 分析原则：
-1. 以子平格局和旺衰喜用为主，必要时参考盲派做功思路。
-2. 推理过程要连贯自然，像你在解释给命主听，不必分点罗列。关键判断要在 reasoning 中体现。
-3. 结论要具体，但必须有命局依据，禁止为了迎合用户而编造不存在的吉凶事件。
+1. **取象优先，公式为辅**：先用盲派取象/象法把干支、十神、宫位"看作具体的人事物场景"，再以子平格局与旺衰喜用做骨架校验。不要一上来就套"七杀=压力/武职""财星=钱"这类刻板对应——同一个十神在不同季节(令)、通根、刑冲合化、喜忌下取象完全不同（例：庚金七杀，春月有火炼取刀剑/执法/武职之象；冬月水冷金寒取道路/法律/医疗/冰冷之金的象）。结论要落到"像什么生活场景"，而不是干巴巴的十神标签。
+2. **两步取象推理（必须执行，结果写入 `quxiang` 字段）**：对日主、关键十神、职业、健康，先①列出该干支/十神在本局至少 3–5 种可能的取象，②结合季节、通根、刑冲合化、喜忌，选出最贴切的一种并说明为什么排除其他。取不出 3 个象、或讲不清取舍理由，说明这个判断不稳，必须在 confidence 里下调。这一步是核心，禁止跳过直接下结论。
+3. 推理过程要连贯自然，像你在解释给命主听。关键判断和取象取舍都要在 reasoning 中体现。
+4. 结论要具体，但必须有命局依据，禁止为了迎合用户而编造不存在的吉凶事件。
 4. 财富等级直断标准（严格按此执行，不能随意）：
    - 贫/温饱：日主极弱，财星全无或财星被坏，无用神救助。
    - 小康：财星有根但身弱难担，靠正财工资收入，无大财。
@@ -238,7 +321,7 @@ def _build_system_prompt(knowledge_context: str) -> str:
    - 二婚/多婚：夫妻宫被冲穿严重，配偶星混杂，或日支反复受伤。
    - 孤独：配偶星全无，夫妻宫被坏，又走忌神运。
 6. milestones 只允许列高置信度节点，必须满足以下条件之一：
-   - 婚动/结婚：流年或大运与夫妻宫（日支）六合、三合、红鸾天喜，或配偶星透干合身。
+   - 婚动/结婚（盲派象法应期，满足任一即可，不要只认配偶星一种）：①流年/大运与夫妻宫（日支）六合、三合、暗合；②配偶星（男命正财/偏财、女命正官/七杀）透干合身或坐夫妻宫；③**比劫合入夫妻宫→应期找比劫年/大运**（比劫即命主自身"进"了夫妻宫，主成家）；④桃花（子午卯亥，按年支/日支查）引动夫妻宫；⑤夫妻宫逢冲而动（冲开原局合绊也为应期）。
    - 离婚/感情危机：夫妻宫被冲、刑、穿，且配偶星受制。
    - 财富转折：财星、财库、食伤被大运/流年强烈引动（如冲开财库、食伤生财）。
    - 事业转折：官杀、印星、食伤发生重大变化，如杀印相生、伤官见官。
@@ -253,6 +336,7 @@ def _build_system_prompt(knowledge_context: str) -> str:
 8. 如果八字有争议或时辰不准，必须给出置信度和 caveat。置信度只能在顶层 `confidence` 字段出现，禁止在 domain_analysis、summary、events、wealth_level、marriage_status、liuqin_analysis 等任何字符串里追加“（置信度：...）”。
 9. 输出必须是 JSON，不要有任何额外解释文字。
 10. 在给出最终结论前，先用基础知识交叉验证：日主、月令、格局、用神忌神的组合是否合理。
+11. **事件/流年是"命理趋势概率"，不是定数**：八字对具体事件/年份的预测本质上不确定性极高（开放式事件预测准确率接近随机）。所以 milestones/events 必须用概率语气——"易有X倾向""需防X""X可能性较高"，**禁止"必发生/一定/肯定"等断言**。结构层（格局/用神/六亲/财富等级）当确定判断直断；事件层当趋势提示。这才是负责任的真人命理表达。
 
 示例输出格式（仅供参考，不要直接照搬内容；重点看语气，不是结论）：
 {{
@@ -341,12 +425,13 @@ def _build_user_prompt(
         structural_text = f"""【命局结构事实】（由程序严格计算，你必须以此为依据，禁止自行发明）
 - 日主：{structural_facts.get("day_master", "")}
 - 月令：{structural_facts.get("month_branch", "")}
+- 格局（月令定格，程序判定，**直接采用，禁止自行另取**）：{structural_facts.get("geju", "") or "（月令比劫，需另寻透干格局）"}
 - 天干十神：{stem_shishen_text}
 - 地支十神（本气）：{branch_shishen_text}
 - 五行统计（天干0.5+地支1.0）：{structural_facts.get("element_weighted_text", "")}
 - 参考旺衰：{structural_facts.get("strength", "")}
-- 参考用神：{structural_facts.get("useful_gods", "")}
-- 参考忌神：{structural_facts.get("taboo_gods", "")}
+- 用神（程序按扶抑/调候/通关三法判定，**直接采用，原局取用以此为准**）：{structural_facts.get("useful_gods", "")}
+- 忌神（程序判定，**直接采用**）：{structural_facts.get("taboo_gods", "")}
 - 天干合化：{structural_facts.get("tian_gan_he_text", "无")}
 - 地支合冲刑害：{structural_facts.get("di_zhi_relations_text", "无")}
 - 地支综合关系（含三合/半合/三会/藏干合/冲合互解）：
@@ -383,6 +468,8 @@ def _build_user_prompt(
 {flow_text}
 
 【六亲星宫事实】（由程序严格计算，你必须以此为依据，禁止把星和宫的位置说错）
+**六亲强弱（每条末尾括号内 强/弱）由程序按"星根是否被冲/合化坏"判定，直接采用。** 尤其"有根、但被逢冲/合化坏根，实为虚浮无力"必须判**弱**——不要因为字面看到"有根/透干"就自行改判强。
+**【强制·禁止改判】** 你必须把上方每一条【父亲/母亲/配偶/儿子/女儿/兄弟/姐妹】末尾括号里的"强"或"弱"**逐字**填入输出 JSON 的 `liuqin_strength` 字段对应键（father/mother/spouse/son/daughter/brother/sister），每个值只能是"强"或"弱"二选一，禁止综合折中、禁止凭自己的旺衰感觉改判、禁止留空。`liuqin_analysis` 里每一方的"真假强弱"叙述也必须与 `liuqin_strength` 完全一致——这是把程序判定的强弱搬进读盘结论的唯一通道，违反即判错。
 {liuqin_text}
 
 夫妻宫：日支{liuqin_facts.get('spouse_palace', {}).get('branch', '')}，本气十神为{liuqin_facts.get('spouse_palace', {}).get('shishen_main', '')}。
@@ -411,7 +498,22 @@ def _build_user_prompt(
     "useful_gods": ["用神1", "用神2"],
     "taboo_gods": ["忌神1", "忌神2"]
   }},
-  "reasoning": "完整的逐步推理过程，300-800字。必须包含：日主旺衰判断、格局取法、用神忌神选择、各领域推断依据。",
+  "reasoning": "完整的逐步推理过程，300-800字。必须包含：日主旺衰判断、格局取法、用神忌神选择、各领域推断依据。取象的展开过程写在 quxiang 字段，这里只做骨架推理。",
+  "quxiang": {{
+    "day_master": "对日主天干【在本局季节(令)/通根/刑冲合化下】的取象：先列出至少3种可能的取象(如庚金在不同条件可取刀剑/道路/法律/医疗/矿石等)，再标出本局最贴切的一种，并说明为什么排除其他。",
+    "key_shishen": "挑命局最关键的1-2个十神(如最旺的财/官/杀/食伤)逐一取象：每个先列≥3种取象→再择优→并给出排除其他取象的理由。禁止直接套'七杀=压力'这类刻板对应。",
+    "career": "由关键十神的取象落到具体职业场景：先列≥3种可能的职业方向(如外科/法律/机械/金融/文教)，再结合用神与季节择优，说明为什么排除其他。",
+    "health": "五行偏枯与受克脏腑的取象：先列≥3种可能的健康隐患脏腑，再结合最失衡的五行择优，说明排除理由。"
+  }},
+  "liuqin_strength": {{
+    "father": "强 或 弱——逐字复制【六亲星宫事实】中【父亲】末尾括号内的判定，禁止自行改判",
+    "mother": "强 或 弱——逐字复制【母亲】末尾括号内的判定",
+    "spouse": "强 或 弱——逐字复制【配偶】末尾括号内的判定",
+    "son": "强 或 弱——逐字复制【儿子】末尾括号内的判定",
+    "daughter": "强 或 弱——逐字复制【女儿】末尾括号内的判定",
+    "brother": "强 或 弱——逐字复制【兄弟】末尾括号内的判定",
+    "sister": "强 或 弱——逐字复制【姐妹】末尾括号内的判定"
+  }},
   "domain_analysis": {{
     "career": "事业分析（只写结论，禁止写置信度）",
     "wealth": "财运分析（只写结论，禁止写置信度）",
@@ -422,12 +524,12 @@ def _build_user_prompt(
   "wealth_evidence": "给出财富等级的依据，必须说明：1）原局财星/食伤/库的情况；2）日主能否担财；3）是否有财杀印流通；4）哪几步大运对财富最有利/最不利。禁止在这里写'一线城市XX万'这类具体金额。",
   "marriage_status": "从「未婚、早婚、晚婚、一婚稳定、二婚、多婚、孤独」中选择一项",
   "marriage_evidence": "给出婚姻状况的简要依据",
-  "liuqin_analysis": "详细的六亲断语，必须是完整段落，不要只列标签。必须包含以下小节，每节都要先说星宫依据再下断语：\\n【父亲】父星是什么十神、落在哪一柱天干/地支藏干，父亲性格、能力、健康、与命主关系。\\n【母亲】母星是什么十神、落在哪一柱，母亲性格、能力、健康、与命主关系。\\n【配偶】男命以正财为妻星/女命以正官为夫星，落在哪一柱；夫妻宫日支是什么、本气十神是什么。配偶性格、能力、健康、外貌、与命主婚姻状态。\\n【子女】先判断命中偏向儿子、女儿还是儿女双全，并给出命局依据。再分别写儿子和女儿的性格、能力、健康、与命主关系。\\n【兄弟姐妹】兄弟星比肩、姐妹星劫财分别落在哪一柱，兄弟几人、姐妹几人、是否得力、与命主关系。\\n【六亲关系】父亲与母亲关系、配偶与父母关系、命主与手足关系等互动特点。",
+  "liuqin_analysis": "详细的六亲断语，必须是完整段落，不要只列标签。【强制要求】对父亲、母亲、配偶、子女每一方，都必须明确给出三句定性：①该六亲星是真是假（真星=通根得令有力；假星=虚浮无根受克）；②是强是弱（旺/衰）；③与命主缘深缘薄、助力还是拖累。禁止含糊其辞、禁止只描述不下结论。必须包含以下小节，每节都要先说星宫依据再下断语：\\n【父亲】父星是什么十神、落在哪一柱天干/地支藏干，真假强弱，父亲性格、能力、健康、与命主关系缘深缘薄。\\n【母亲】母星是什么十神、落在哪一柱，真假强弱，母亲性格、能力、健康、与命主关系。\\n【配偶】男命以正财为妻星/女命以正官为夫星，落在哪一柱；夫妻宫日支是什么、本气十神是什么。配偶星真假强弱，配偶性格、能力、健康、外貌、与命主婚姻状态。\\n【子女】先判断命中偏向儿子、女儿还是儿女双全，并给出命局依据。再分别写儿子和女儿的性格、能力、健康、与命主关系。\\n【兄弟姐妹】兄弟星比肩、姐妹星劫财分别落在哪一柱，兄弟几人、姐妹几人、是否得力、与命主关系。\\n【六亲关系】父亲与母亲关系、配偶与父母关系、命主与手足关系等互动特点。",
   "milestones": [
     {{"year": 年份, "age": 年龄, "type": "婚动/子女/事业转折/财富转折/重大疾病/搬迁/学业/其他", "description": "必须有命局依据，证据不足时宁可留空数组"}}
   ],
   "personality": "根据日主、十神、五行喜忌，描述命主的性格、行为模式与气质特点，200字以内。",
-  "events": ["直断1：具体事件或趋势", "直断2：具体事件或趋势", "直断3：具体事件或趋势"],
+  "events": ["趋势1：用概率语气的事件倾向（如'中年易有感情波折'，禁止'必离婚'）", "趋势2", "趋势3"],
   "summary": ["3-5条核心断语"],
   "confidence": "high|medium|low",
   "caveats": ["可能的误差来源"]
@@ -545,21 +647,27 @@ async def analyze_bazi(
     if aiohttp is None:  # pragma: no cover
         raise ImportError("需要 aiohttp 来调用 DeepSeek API")
 
+    is_reasoner = "reasoner" in mdl.lower()
     payload = {
         "model": mdl,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.2,
-        "max_tokens": 2500,
-        "response_format": {"type": "json_object"},
+        # deepseek-reasoner does not support json_object response_format and
+        # needs a larger final-answer budget (reasoning tokens are billed
+        # separately). deepseek-chat gets json mode + a smaller budget.
+        "max_tokens": 8000 if is_reasoner else 5000,
     }
+    if not is_reasoner:
+        payload["temperature"] = 0.2
+        payload["response_format"] = {"type": "json_object"}
 
     last_error: Optional[Exception] = None
     for attempt in range(1, 4):
         try:
-            timeout = aiohttp.ClientTimeout(total=60)
+            # deepseek-reasoner needs much longer for a full deep reading.
+            timeout = aiohttp.ClientTimeout(total=240 if is_reasoner else 60)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     f"{base}/chat/completions",

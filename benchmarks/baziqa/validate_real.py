@@ -199,21 +199,47 @@ def _engine_liuqin_section(liuqin_text: str, subject: str) -> str:
     return liuqin_text[start:next_label if next_label != -1 else len(liuqin_text)]
 
 
-def _liuqin_compare(master: str, engine_lq) -> Dict:
+_SUBJ_FIELD_KEYS = {
+    "father": ["father"], "mother": ["mother"], "spouse": ["spouse"],
+    "child": ["son", "daughter"], "sibling": ["brother", "sister"],
+}
+
+
+def _field_strength(strength_field, subj: str) -> str:
+    """Read the structured `liuqin_strength` echo for subj → 强/弱/?.
+
+    Pure adoption signal: did the LLM copy the injected verdict into the
+    dedicated field? Unaffected by prose keyword noise.
+    """
+    for key in _SUBJ_FIELD_KEYS.get(subj, []):
+        val = (strength_field or {}).get(key)
+        if isinstance(val, str):
+            v = val.strip()
+            if v and "弱" in v and "强" not in v:
+                return "弱"
+            if v and "强" in v and "弱" not in v:
+                return "强"
+    return "?"
+
+
+def _liuqin_compare(master: str, engine_lq, strength_field=None) -> Dict:
     subj = _detect_liuqin_subject(master)
     if not subj:
         return {"subject": "", "compared": False}
     sec = _engine_liuqin_section(engine_lq or "", subj)
     m_dir = _strength_dir(_master_subject_section(master, subj))
-    e_dir = _strength_dir(sec)
+    e_prose = _strength_dir(sec)                      # real reading (narrative)
+    e_field = _field_strength(strength_field, subj)   # adoption echo (structured)
     subj_zh = {"father": "父亲", "spouse": "配偶", "mother": "母亲",
                "child": "子女", "sibling": "兄弟姐妹"}[subj]
     return {
         "subject": subj_zh,
         "compared": True,
         "master_strength": m_dir,
-        "engine_strength": e_dir,
-        "strength_match": (m_dir != "?" and e_dir != "?" and m_dir == e_dir),
+        "engine_strength": e_prose,       # headline: the prose the user reads
+        "field_strength": e_field,        # diagnostic: did LLM echo injected verdict?
+        "strength_match": (m_dir != "?" and e_prose != "?" and m_dir == e_prose),
+        "field_match": (m_dir != "?" and e_field != "?" and m_dir == e_field),
         "engine_section": sec.strip()[:200],
     }
 
@@ -285,7 +311,8 @@ def _compare(rec: Dict) -> Dict:
         "engine_health_text": eng_health[:160],
         "engine_career_text": eng_career[:160],
         "master_snippet": master[:200],
-        "liuqin": _liuqin_compare(master, res.get("liuqin_analysis")),
+        "liuqin": _liuqin_compare(master, res.get("liuqin_analysis"),
+                                 res.get("liuqin_strength") or {}),
     }
 
 
@@ -320,7 +347,7 @@ async def main() -> None:
         if lq.get("compared"):
             mark = "✓" if lq["strength_match"] else "✗"
             print(f"  六亲[{lq['subject']}] 强弱: master={lq['master_strength']} "
-                  f"engine={lq['engine_strength']} → {mark}")
+                  f"engine={lq['engine_strength']} field={lq.get('field_strength', '?')} → {mark}")
             print(f"    engine断: {lq['engine_section']}")
         else:
             print(f"  六亲: (master 未聚焦单一六亲，跳过自动比对)")
@@ -342,6 +369,9 @@ async def main() -> None:
     print(f"  职业象有交集: {career_rate:.0%}  (同上，多为家人职业)")
     print(f"  健康象有交集: {health_rate:.0%}  (健康指命主，较可信)")
     print(f"  六亲强弱一致: {lq_rate:.0%}  (n={len(lq_cases)}，apples-to-apples，最可信)")
+    lq_field_rate = (sum(1 for r in lq_cases if r["cmp"]["liuqin"].get("field_match"))
+                     / len(lq_cases)) if lq_cases else 0.0
+    print(f"  六亲强弱(字段采纳): {lq_field_rate:.0%}  (LLM 逐字复述注入判定；应≈确定性层，高于prose则=采纳)")
 
     if args.output:
         Path(args.output).write_text(

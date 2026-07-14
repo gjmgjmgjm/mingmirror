@@ -455,27 +455,51 @@ def structural_profile(bazi: str) -> Optional[Dict]:
     else:
         strength = "中和"
 
-    guan_sha = _find_key(_RESTRAINING, dm_element)
-    shi_shang = _GENERATING[dm_element]
-    cai = _RESTRAINING[dm_element]
-    yin = _find_key(_GENERATING, dm_element)
-    bi_jie = dm_element
+    # 中和 bucket 太宽（dm_score 1.0~2.5 都落这）：用"生扶 vs 克泄耗"平衡做二次判定。
+    # 帮身=印(生我)+比劫(同我)；耗身=官杀(克我)+食伤(我生)+财(我克)。
+    if strength == "中和":
+        yin_el = _find_key(_GENERATING, dm_element)
+        shi_el = _GENERATING[dm_element]
+        cai_el = _RESTRAINING[dm_element]
+        guan_el = _find_key(_RESTRAINING, dm_element)
+        help_score = weighted[dm_element] + weighted.get(yin_el, 0.0)
+        drain_score = (weighted.get(shi_el, 0.0) + weighted.get(cai_el, 0.0)
+                       + weighted.get(guan_el, 0.0))
+        if help_score - drain_score >= 1.0:
+            strength = "偏旺"
+        elif drain_score - help_score >= 1.0:
+            strength = "偏弱"
+        # 差距 <1.0 才真正保留中和
 
-    def _el_label(el: str) -> str:
-        return el
+    # 用神/忌神：统一走 yongshen.resolve（扶抑+调候+通关），避免双实现漂移。
+    try:
+        from tools.bazi_ai.yongshen import resolve_yongshen
 
-    if strength == "偏旺":
-        useful = [_el_label(guan_sha), _el_label(shi_shang), _el_label(cai)]
-        taboo = [_el_label(bi_jie), _el_label(yin)]
-    elif strength == "偏弱":
-        useful = [_el_label(yin), _el_label(bi_jie)]
-        taboo = [_el_label(guan_sha), _el_label(cai)]
-    else:
-        useful = []
-        taboo = []
-
-    useful = list(dict.fromkeys([x for x in useful if x]))
-    taboo = list(dict.fromkeys([x for x in taboo if x]))
+        _ys = resolve_yongshen(bazi)
+        useful = list(_ys.get("useful_gods") or [])
+        taboo = list(_ys.get("taboo_gods") or [])
+        strength = _ys.get("strength") or strength
+        yongshen_block = _ys.get("prompt_block") or ""
+        yongshen_primary = _ys.get("primary_method") or ""
+    except Exception:
+        # Fallback: legacy 扶抑-only if yongshen import/runtime fails.
+        guan_sha = _find_key(_RESTRAINING, dm_element)
+        shi_shang = _GENERATING[dm_element]
+        cai = _RESTRAINING[dm_element]
+        yin = _find_key(_GENERATING, dm_element)
+        bi_jie = dm_element
+        if strength == "偏旺":
+            useful = [guan_sha, shi_shang, cai]
+            taboo = [bi_jie, yin]
+        elif strength == "偏弱":
+            useful = [yin, bi_jie]
+            taboo = [guan_sha, cai]
+        else:
+            useful, taboo = [], []
+        useful = list(dict.fromkeys([x for x in useful if x]))
+        taboo = list(dict.fromkeys([x for x in taboo if x and x not in useful]))
+        yongshen_block = ""
+        yongshen_primary = "扶抑"
 
     # Build text descriptions of structural relations
     tg_he = _tian_gan_he(stems)
@@ -538,6 +562,22 @@ def structural_profile(bazi: str) -> Optional[Dict]:
         f"时柱{hour}代表子女、晚辈、下属、学生及晚年运势。"
     )
 
+    # 确定性格局（子平月令定格：取月支本气藏干的十神为格，争议远小于用神）。
+    # 注意 branch_shishen 只给分类(比劫/官杀/...)，需用本气藏干算细十神区分正偏。
+    _ZHI_MAIN_GAN = {"子": "癸", "丑": "己", "寅": "甲", "卯": "乙", "辰": "戊",
+                     "巳": "丙", "午": "丁", "未": "己", "申": "庚", "酉": "辛",
+                     "戌": "戊", "亥": "壬"}
+    _GEJU_MAP = {
+        "食神": "食神格", "伤官": "伤官格",
+        "正财": "正财格", "偏财": "偏财格",
+        "正官": "正官格", "七杀": "七杀格",
+        "正印": "正印格", "偏印": "偏印格",
+        "比肩": "建禄格", "劫财": "月劫格",
+    }
+    month_main_gan = _ZHI_MAIN_GAN.get(branches[1], "")
+    month_main_ss = shishen_for_stem(day_master, month_main_gan) if month_main_gan else ""
+    geju = _GEJU_MAP.get(month_main_ss, "")
+
     return {
         "day_master": day_master,
         "month_branch": branches[1],
@@ -548,8 +588,11 @@ def structural_profile(bazi: str) -> Optional[Dict]:
         "element_counts_text": ",".join(f"{k}{counts[k]}" for k in ["木", "火", "土", "金", "水"]),
         "element_weighted_text": ",".join(f"{k}{weighted[k]:.1f}" for k in ["木", "火", "土", "金", "水"]),
         "strength": strength,
+        "geju": geju,
         "useful_gods": ",".join(useful) or "需细断",
         "taboo_gods": ",".join(taboo) or "需细断",
+        "yongshen_primary": yongshen_primary,
+        "yongshen_block": yongshen_block,
         "tian_gan_he": tg_he,
         "tian_gan_he_text": tg_he_text,
         "di_zhi_relations": dz_rel,
@@ -689,6 +732,60 @@ def _element_relation(day_master: str, char: str) -> str:
     return "平"
 
 
+def _star_element(day_master: str, shishen: str) -> str:
+    """五行 of the given 十神 relative to day master."""
+    dm_el = _ELEMENT[day_master]
+    if shishen in ("比肩", "劫财"):
+        return dm_el
+    if shishen in ("食神", "伤官"):
+        return _GENERATING[dm_el]
+    if shishen in ("偏财", "正财"):
+        return _RESTRAINING[dm_el]
+    if shishen in ("七杀", "正官"):
+        return _find_key(_RESTRAINING, dm_el)
+    if shishen in ("偏印", "正印"):
+        return _find_key(_GENERATING, dm_el)
+    return dm_el
+
+
+_LQ_POSITIONS = ("年支", "月支", "日支", "时支")
+_LQ_ELEMENTS = ("木", "火", "土", "金", "水")
+
+
+def _resolved_clash_pairs(dz_comp: dict) -> set:
+    """六冲 pairs that are neutralized (冲被合解) — a resolved clash does NOT
+    spoil a root. Returns a set of frozenset({posA, posB})."""
+    out = set()
+    for tup in dz_comp.get("冲合互解", []):
+        if len(tup) >= 2 and "冲被合解" in " ".join(str(t) for t in tup):
+            out.add(frozenset([tup[0], tup[1]]))
+    return out
+
+
+def _root_destroyed_at(pos: str, star_el: str, dz_comp: dict,
+                       resolved_clash: set = None) -> str:
+    """Reason the root at branch *pos* is spoiled, or ''.
+
+    六冲 shakes the root — but ONLY if the clash is not neutralized (冲被合解);
+    合(化) to an element ≠ the star's transforms the root away. This fixes the
+    冲坏根 over-fire (master still calls a star 强 when its clash is resolved or
+    it has other support).
+    """
+    resolved_clash = resolved_clash or set()
+    for tup in dz_comp.get("六冲", []):
+        if pos in tup:
+            pair = frozenset([tup[0], tup[1]])
+            if pair not in resolved_clash:
+                return "逢冲"
+    for key in ("六合", "三合", "三会"):
+        for tup in dz_comp.get(key, []):
+            poses = [t for t in tup if t in _LQ_POSITIONS]
+            hua = tup[-1] if tup and tup[-1] in _LQ_ELEMENTS else ""
+            if pos in poses and hua and hua != star_el:
+                return f"合化{hua}"
+    return ""
+
+
 def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
     """Return six-relations structural facts keyed by family member.
 
@@ -755,22 +852,55 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
                 line += f"，落在{palace}"
             lines.append(line)
 
-        # Determine if the star has root / is supported
+        # Determine if the star has root / is supported.
+        # Three fixes from diagnose:
+        # ① 冲坏根 over-fire → 条件化(已解决冲不算; 有其他支持时不判弱)
+        # ② 中档太宽(有根无透干非得令→弱,大师倾向) → 收紧为弱
+        # ③ 透干无根=弱 (keep, 大师偶尔判强是例外)
         has_stem = any(loc["type"] == "天干" for loc in unique_locs)
-        has_branch_root = any(loc["type"] in ("地支本气", "地支藏干") for loc in unique_locs)
+        root_positions = [loc["position"] for loc in unique_locs
+                          if loc["type"] in ("地支本气", "地支藏干") and loc["position"] in _LQ_POSITIONS]
+        has_branch_root = bool(root_positions)
+        star_el = _star_element(day_master, shishen)
+        dz_comp = profile.get("di_zhi_comprehensive", {})
+        resolved_clash = _resolved_clash_pairs(dz_comp)
+        destroyed = [(rp, _root_destroyed_at(rp, star_el, dz_comp, resolved_clash))
+                     for rp in root_positions]
+        destroyed = [(rp, r) for rp, r in destroyed if r]
+        destroyed_set = {rp for rp, _ in destroyed}
+        intact_roots = [rp for rp in root_positions if rp not in destroyed_set]
+        dedeling = ("月支" in root_positions and "月支" in intact_roots)
+
         support_notes = []
         if has_stem:
             support_notes.append("透干有力")
         if has_branch_root:
             support_notes.append("有根")
+        if destroyed:
+            sup_note = "、".join(f"{rp}{r}" for rp, r in destroyed)
+            sup_suffix = ""
+            if resolved_clash and any(
+                    frozenset([rp, "月支"]) in resolved_clash or frozenset([rp, "年支"]) in resolved_clash
+                    for rp, _ in destroyed):
+                sup_suffix = "（该冲已被合解）"
+            support_notes.append(f"但{sup_note}坏根{sup_suffix}，实为虚浮无力")
         support_text = "、".join(support_notes) if support_notes else "虚浮无根"
+
+        # Effective strength (master-like binary, 中→弱 tightened).
+        if intact_roots and (has_stem or dedeling):
+            strength = "强"    # intact root + (透干 or 得令) → 强
+        elif has_stem and not intact_roots and not has_branch_root:
+            strength = "弱"    # 透干无根 → 虚浮 → 弱
+        else:
+            strength = "弱"    # 有根无透干非得令→弱; 虚浮→弱; 根全坏→弱
 
         return {
             "star": shishen,
             "exists": True,
             "locations": unique_locs,
+            "strength": strength,
             "support_text": support_text,
-            "description": f"{relation}以{shishen}为星：" + "；".join(lines) + f"。整体{support_text}。",
+            "description": f"{relation}以{shishen}为星：" + "；".join(lines) + f"。整体{support_text}（{strength}）。",
         }
 
     result: Dict[str, Any] = {
