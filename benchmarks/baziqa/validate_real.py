@@ -187,6 +187,41 @@ def _strength_dir(text: str) -> str:
     return "?"
 
 
+# ---- engine-prose strength (separate from master's 真星/假星+旺/衰 style) ----
+# The engine rewords the injected verdict in free text; its weak phrasings
+# (有根但弱 / 受损 / 缘分浅 / 助力不大 / 被合化 / 夺食, plus a bare trailing 弱)
+# differ from 杨炎 master prose. Validated offline (_rescore_prose.py, n=30):
+# lifts prose match 57%→73%, tracking the field anchor (77%) — i.e. the old 60%
+# headline was comparator crudeness, not reading-quality.
+_ENG_WEAK_RE = re.compile(
+    r"假星|虚浮|无根|不现|无力|缘(?:分)?(?:浅|薄)|助力(?:不大|有限|不显)|受损|穿害|"
+    r"合化|合坏|坏根|夺食|截脚|根气不固|减弱|偏弱|虚弱|受克|耗泄|争合|孤露"
+)
+_ENG_STRONG_RE = re.compile(r"真星|强根|通根|得令|帝旺|长生|有力|稳固|根深|真而(?:旺|强)")
+_ENG_HEDGE_RE = re.compile(r"看似.{0,6}(?:有力|旺|强|有根)")
+_ENG_WEAK_BARE_RE = re.compile(r"(?<!不)弱")  # bare 弱 verdict, but not 不弱/不算弱
+
+
+def _engine_strength_dir(text: str) -> str:
+    """Verdict-first strength for the ENGINE's liuqin_analysis prose.
+
+    Discounts '看似…有力/旺/强' hedges; when both strong and weak cues appear,
+    weak wins (engine pattern: '看似强，但…弱'). Returns 强/弱/?.
+    """
+    if not text:
+        return "?"
+    t = _ENG_HEDGE_RE.sub("看似", text)
+    weak = bool(_ENG_WEAK_RE.search(t)) or bool(_ENG_WEAK_BARE_RE.search(t))
+    strong = bool(_ENG_STRONG_RE.search(t))
+    if weak and not strong:
+        return "弱"
+    if strong and not weak:
+        return "强"
+    if weak and strong:
+        return "弱"
+    return "?"
+
+
 def _engine_liuqin_section(liuqin_text: str, subject: str) -> str:
     """Pull the engine's 【<subject>】... section out of the liuqin narrative."""
     if not isinstance(liuqin_text, str) or not subject:
@@ -228,7 +263,7 @@ def _liuqin_compare(master: str, engine_lq, strength_field=None) -> Dict:
         return {"subject": "", "compared": False}
     sec = _engine_liuqin_section(engine_lq or "", subj)
     m_dir = _strength_dir(_master_subject_section(master, subj))
-    e_prose = _strength_dir(sec)                      # real reading (narrative)
+    e_prose = _engine_strength_dir(sec)               # real reading (narrative)
     e_field = _field_strength(strength_field, subj)   # adoption echo (structured)
     subj_zh = {"father": "父亲", "spouse": "配偶", "mother": "母亲",
                "child": "子女", "sibling": "兄弟姐妹"}[subj]
