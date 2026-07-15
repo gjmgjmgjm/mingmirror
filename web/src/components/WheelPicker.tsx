@@ -7,12 +7,10 @@ interface WheelPickerProps {
   label?: string;
   disabled?: boolean;
   placeholder?: string;
+  visibleItems?: 3 | 5 | 7;
 }
 
 const ITEM_HEIGHT = 44;
-const VISIBLE_ITEMS = 5;
-const CONTAINER_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS;
-const CENTER_OFFSET = Math.floor(VISIBLE_ITEMS / 2) * ITEM_HEIGHT;
 
 export default function WheelPicker({
   options,
@@ -21,11 +19,17 @@ export default function WheelPicker({
   label,
   disabled = false,
   placeholder,
+  visibleItems = 5,
 }: WheelPickerProps) {
+  const VISIBLE_ITEMS = visibleItems;
+  const CONTAINER_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS;
+  const CENTER_OFFSET = Math.floor(VISIBLE_ITEMS / 2) * ITEM_HEIGHT;
   const containerRef = useRef<HTMLDivElement>(null);
   const isProgrammaticScroll = useRef(false);
   const bumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelAccumulator = useRef(0);
+  const wheelResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [bumped, setBumped] = useState(false);
 
@@ -95,9 +99,25 @@ export default function WheelPicker({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     if (!containerRef.current || disabled) return;
-    const delta = e.deltaY > 0 ? 1 : -1;
+
+    // Accumulate wheel delta and only step once per item-height threshold.
+    // This prevents a single trackpad/mouse wheel flick from jumping multiple items.
+    wheelAccumulator.current += e.deltaY;
+
+    if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+    wheelResetTimer.current = setTimeout(() => {
+      wheelAccumulator.current = 0;
+    }, 150);
+
+    const threshold = ITEM_HEIGHT * 0.65;
+    if (Math.abs(wheelAccumulator.current) < threshold) return;
+
+    const steps = Math.floor(Math.abs(wheelAccumulator.current) / threshold);
+    const direction = wheelAccumulator.current > 0 ? 1 : -1;
+    wheelAccumulator.current = 0;
+
     const currentIndex = Math.round(containerRef.current.scrollTop / ITEM_HEIGHT);
-    settleToIndex(currentIndex + delta);
+    settleToIndex(currentIndex + steps * direction);
   };
 
   const handleInteractionStart = () => setIsDragging(true);

@@ -29,15 +29,20 @@ export default function CouncilLoader({ systems }: CouncilLoaderProps) {
   }, []);
 
   return (
-    <div className="panel p-8 md:p-10">
-      <div className="relative mx-auto flex h-48 w-full max-w-md flex-col items-center justify-center">
-        {/* Orbit ring */}
+    <div className="panel overflow-hidden p-8 md:p-10">
+      <div className="relative mx-auto flex h-52 w-full max-w-md flex-col items-center justify-center">
+        {/* Outer glow */}
+        <div className="pointer-events-none absolute h-56 w-56 rounded-full bg-vermilion/5 blur-3xl dark:bg-vermilion/10" aria-hidden="true" />
+
+        {/* Orbit rings with 3D tilt */}
         <div
           className="absolute h-32 w-32 rounded-full border border-dashed border-ink-300/40 dark:border-ink-500/40"
+          style={{ transform: "rotateX(60deg)" }}
           aria-hidden="true"
         />
         <div
           className="absolute h-40 w-40 rounded-full border border-ink-200/30 dark:border-ink-600/30"
+          style={{ transform: "rotateX(60deg) rotateY(15deg)" }}
           aria-hidden="true"
         />
 
@@ -45,10 +50,11 @@ export default function CouncilLoader({ systems }: CouncilLoaderProps) {
         {labels.map((label, index) => (
           <div
             key={label}
-            className="absolute flex h-9 w-9 items-center justify-center rounded-full bg-ink-100 text-xs font-medium text-ink-700 shadow-sm dark:bg-ink-800 dark:text-ink-200"
+            className="absolute flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-xs font-medium text-vermilion shadow-md shadow-vermilion/10 ring-1 ring-vermilion/20 dark:bg-ink-800 dark:text-vermilion-light dark:ring-vermilion/30"
             style={{
-              animation: `orbit 2.4s linear infinite`,
-              animationDelay: `${index * (2.4 / labels.length)}s`,
+              animation: `council-orbit 2.8s linear infinite`,
+              animationDelay: `${index * (2.8 / labels.length)}s`,
+              transformStyle: "preserve-3d",
             }}
           >
             {label}
@@ -56,7 +62,7 @@ export default function CouncilLoader({ systems }: CouncilLoaderProps) {
         ))}
 
         {/* Center hub */}
-        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-vermilion/10 dark:bg-vermilion/20">
+        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-vermilion/10 ring-2 ring-vermilion/20 dark:bg-vermilion/20">
           <div className="h-10 w-10 animate-hub-pulse rounded-full bg-vermilion/20 dark:bg-vermilion/30" />
           <span className="absolute text-lg font-semibold text-vermilion">议</span>
         </div>
@@ -72,12 +78,12 @@ export default function CouncilLoader({ systems }: CouncilLoaderProps) {
       </div>
 
       <style>{`
-        @keyframes orbit {
+        @keyframes council-orbit {
           0% {
-            transform: rotate(0deg) translateX(64px) rotate(0deg);
+            transform: rotate(0deg) translateX(64px) rotateX(60deg) rotate(0deg);
           }
           100% {
-            transform: rotate(360deg) translateX(64px) rotate(-360deg);
+            transform: rotate(360deg) translateX(64px) rotateX(60deg) rotate(-360deg);
           }
         }
 

@@ -2,13 +2,25 @@
 """Structural calculations for Qi Zheng Si Yu (七政四余).
 
 This module computes the traditional palace layout from a four-pillar bazi
-string without requiring real astronomical ephemeris data.  It is intentionally
-simplified: life/body palaces, body lord, five-element pattern and the twelve
-palace branches are derived from the birth chart; the actual degrees of the
-seven governors and four remains are left to the LLM layer.
+string.  When ``pyswisseph`` is installed, it can also merge in real
+astronomical data (ascendant, houses, seven governors, four remainders,
+aspects and classical patterns) from ``tools.qizheng.astronomy``.
 """
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+from tools.bazi_ai.calendar import pillars_for_datetime
+
+try:
+    from tools.qizheng import astronomy as qz_astro
+    from tools.qizheng import patterns as qz_patterns
+
+    _QIZHENG_ASTRO_AVAILABLE = True
+except Exception:  # pragma: no cover - optional pyswisseph
+    qz_astro = None  # type: ignore
+    qz_patterns = None  # type: ignore
+    _QIZHENG_ASTRO_AVAILABLE = False
 
 # 十二地支，命宫排盘从寅起正月，顺行。
 _ZHI = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
@@ -218,6 +230,79 @@ def structural_profile(chart: str) -> Optional[Dict[str, Any]]:
         "five_element_pattern": fep,
         "twelve_palaces": palaces,
     }
+
+
+def astro_structural_profile(
+    chart: Optional[str] = None,
+    birth_datetime: Optional[datetime] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    timezone_offset_hours: Optional[float] = None,
+    precession_mode: str = "tropical",
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a merged traditional + astronomical Qi Zheng profile.
+
+    Either *chart* or *birth_datetime* must be provided.  When a datetime and
+    coordinates are supplied, real ephemeris data is merged into the profile
+    under the ``astro`` key.  *precession_mode* is passed to the astronomy
+    layer to control the 28-mansion mapping (``tropical`` or
+    ``sidereal_lahiri`` etc.).  *dignity_table* selects the planetary dignity
+    tradition passed to the astronomy layer.  If ``pyswisseph`` is not
+    installed, the function falls back to the traditional four-pillar profile.
+    """
+    if chart is None and birth_datetime is None:
+        return None
+
+    if chart is None and birth_datetime is not None:
+        try:
+            pillars = pillars_for_datetime(birth_datetime)
+            chart = f"{pillars['year']} {pillars['month']} {pillars['day']} {pillars['hour']}"
+        except Exception:
+            return None
+
+    profile = structural_profile(chart)
+    if profile is None:
+        return None
+
+    if (
+        birth_datetime is not None
+        and latitude is not None
+        and longitude is not None
+        and _QIZHENG_ASTRO_AVAILABLE
+    ):
+        try:
+            astro = qz_astro.astro_profile(
+                birth_datetime,
+                latitude,
+                longitude,
+                timezone_offset_hours,
+                precession_mode=precession_mode,
+                dignity_table=dignity_table,
+            )
+            profile["astro"] = astro
+            body_positions = {
+                name: info["longitude"]
+                for name, info in astro["bodies"].items()
+            }
+            body_houses = {
+                name: info["house"] for name, info in astro["bodies"].items()
+            }
+            body_strengths = {
+                name: info["strength"] for name, info in astro["bodies"].items()
+            }
+            palace_branches = profile.get("twelve_palaces", {})
+            profile["aspects"] = qz_patterns.compute_aspects(body_positions)
+            profile["patterns"] = qz_patterns.detect_patterns(
+                body_houses,
+                body_positions,
+                body_strengths=body_strengths,
+                palace_branches=palace_branches,
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            profile["astro_error"] = f"天文计算失败：{exc}"
+
+    return profile
 
 
 def profile_text(profile: Dict[str, Any]) -> str:

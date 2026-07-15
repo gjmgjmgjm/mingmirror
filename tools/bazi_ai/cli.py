@@ -14,6 +14,7 @@ from tools.bazi_ai.engine import analyze_bazi
 def main():
     parser = argparse.ArgumentParser(description="AI 八字分析器（DeepSeek + RAG）")
     parser.add_argument("bazi", help="八字，例如：甲子 丙寅 戊辰 庚午")
+    parser.add_argument("-g", "--gender", choices=["male", "female", "男", "女"], default="male", help="命主性别（六亲/婚姻/健康判断必需，默认 male）")
     parser.add_argument("-q", "--question", default="", help="命主具体问题")
     parser.add_argument("-c", "--cases", default="./bazi_knowledge/cases.jsonl", help="案例库路径")
     parser.add_argument("-k", "--knowledge", default="./bazi_knowledge/rule_primer.md", help="基础知识库路径")
@@ -29,6 +30,7 @@ def main():
     result = asyncio.run(
         analyze_bazi(
             args.bazi,
+            gender=args.gender,
             question=args.question,
             cases_path=Path(args.cases),
             knowledge_base_path=Path(args.knowledge),

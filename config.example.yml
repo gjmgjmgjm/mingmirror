@@ -133,6 +133,7 @@ bazi_ai:
   # 默认不启用；如需使用，请自行准备合法资料并填写路径。
   # extra_cases_paths:
   #   - ./bazi_knowledge/cases_yangyan.jsonl
+  #   - ./bazi_knowledge/cases_baziqa.jsonl
   # extra_knowledge_base_paths:
   #   - ./bazi_knowledge/杨炎八字绝技_rulebook_compact.md
   top_k: 3

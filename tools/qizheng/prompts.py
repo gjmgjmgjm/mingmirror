@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import aiofiles
 
@@ -24,8 +24,9 @@ async def build_system_prompt(rule_primer_path: Optional[Path]) -> str:
 
 分析原则：
 1. 先排定命盘：命宫、身宫、主星（日、月、命主、身主）分布。
+1.1 如果输入包含出生时间地点，【天文结构事实】由 Swiss Ephemeris 严格计算，包括上升点、七政四余黄经、二十八宿、十二宫、相位、格局，必须以之为依据，禁止自行发明星曜位置。
 2. 判断日主强弱、七政得时失时、四余吉凶。
-3. 结合十二宫分野，逐步推断事业、财运、婚姻、健康。
+3. 结合十二宫分野、二十八宿、星曜相位与格局，逐步推断事业、财运、婚姻、健康。
 4. 结论要具体、可验证，避免空泛。
 5. 输出必须是 JSON，不要有任何额外解释文字。
 
@@ -76,6 +77,73 @@ def _format_example(example: Dict) -> str:
     return f"""输入：\n命盘：{chart}\n\n输出：\n{output}"""
 
 
+def build_astro_profile_text(profile: Dict[str, Any]) -> str:
+    """Format the astronomical sub-profile for LLM prompts."""
+    astro = profile.get("astro")
+    if not astro:
+        return ""
+
+    lines: List[str] = []
+    lines.append("【天文结构事实】（由 pyswisseph 真实星历计算，必须以之为依据）")
+    lines.append(
+        f"- 岁差模式：{astro.get('precession_mode', 'tropical')}"
+        f"（偏移量 {astro.get('precession_offset_degrees', 0)}°）；"
+        f"出生时间（UTC）：{astro.get('birth_datetime_utc')}；"
+        f"地点：纬度 {astro['location']['latitude']}，经度 {astro['location']['longitude']}"
+    )
+    lines.append(
+        f"- 上升点（命度）：{astro['ascendant']}°（{astro['ascendant_zodiac']}座 / "
+        f"{astro['ascendant_mansion']}宿）"
+    )
+    lines.append(
+        f"- 中天（事业顶）：{astro['midheaven']}°（{astro['midheaven_zodiac']}座 / "
+        f"{astro['midheaven_mansion']}宿）"
+    )
+
+    lines.append("- 七政四余落宫（黄经/星座/宿/宫位/庙旺/运行）：")
+    body_order = [
+        "太阳", "太阴", "木星", "火星", "土星", "金星", "水星",
+        "罗睺", "计都", "月孛", "紫气",
+    ]
+    for name in body_order:
+        info = astro["bodies"].get(name)
+        if not info:
+            continue
+        lines.append(
+            f"  · {name}：{info['longitude']}° / {info['zodiac']}座 / "
+            f"{info['mansion']}宿 / 第{info['house']}宫（{info['house_palace']}）/ "
+            f"{info['dignity']} / {info['speed_state']}"
+        )
+
+    lines.append("- 十二宫头：")
+    for h in astro["houses"]:
+        lines.append(
+            f"  · 第{h['index']}宫 {h['palace']}（{h['lord']}主）："
+            f"{h['cusp']}° / {h['zodiac']}座 / {h['mansion']}宿"
+        )
+
+    aspects = profile.get("aspects", [])
+    if aspects:
+        lines.append("- 主要相位：")
+        for asp in aspects[:12]:
+            lines.append(
+                f"  · {'-'.join(asp['bodies'])} {asp['aspect']} "
+                f"{asp['angle']}°（容许 {asp['orb']}°，{asp['auspicious']}）"
+            )
+
+    patterns = profile.get("patterns", [])
+    if patterns:
+        lines.append("-  Detected 格局：")
+        for pat in patterns[:8]:
+            lines.append(f"  · {pat['name']}：{pat['description']}")
+
+    lines.append(
+        "以上星曜位置、宫位、宿度、相位、格局均由程序根据出生时间地点严格计算，"
+        "分析时必须以此为依据，禁止自行发明或改动。"
+    )
+    return "\n".join(lines)
+
+
 def build_user_prompt(
     chart: str,
     question: str,
@@ -111,6 +179,9 @@ def build_user_prompt(
     if profile:
         from tools.qizheng.calendar import profile_text as _profile_text
         profile_text = "\n\n" + _profile_text(profile)
+        astro_text = build_astro_profile_text(profile)
+        if astro_text:
+            profile_text += "\n\n" + astro_text
 
     return f"""请为以下七政四余命盘做详细分析。
 
@@ -119,7 +190,7 @@ def build_user_prompt(
 {focus_instruction}
 
 分析要求：
-1. 以上【七政四余结构事实】由程序严格计算，必须以之为依据；禁止自行发明命宫、身宫、十二宫位置。
+1. 以上【七政四余结构事实】与【天文结构事实】由程序严格计算，必须以之为依据；禁止自行发明命宫、身宫、十二宫位置或星曜落点。
 2. 先排定命宫、身宫、十二宫主星，再判断日主强弱、七政得时失时、四余吉凶。
 2. 事业、财运、婚姻、健康必须直接断具体事件，不要写泛泛建议。
    - 错误示例（禁止）：“事业平稳发展”“财运一般，宜守不宜攻”“注意身体”“感情多沟通”。

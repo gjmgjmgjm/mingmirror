@@ -50,6 +50,9 @@ server = [
     "pydantic>=2.0",
     "sxtwl>=2.0",
 ]
+qizheng = [
+    "pyswisseph>=2.10.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

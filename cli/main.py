@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from auth import CookieManager
 from cli.progress_display import ProgressDisplay
@@ -180,6 +180,12 @@ async def main_async(args):
         return
     if args.extract_bazi or args.build_knowledge_base or args.analyze_bazi:
         await _run_bazi_subcommand(args, config)
+        return
+    if (
+        args.analyze_qizheng is not None
+        or args.qizheng_yearly is not None
+    ):
+        await _run_qizheng_subcommand(args, config)
         return
 
     if args.url:
@@ -437,6 +443,96 @@ async def _run_bazi_subcommand(args, config: ConfigLoader) -> None:
         display.print_info(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+async def _run_qizheng_subcommand(args, config: ConfigLoader) -> None:
+    """处理 --analyze-qizheng 与 --qizheng-yearly 子命令。"""
+    from datetime import datetime as _dt
+
+    try:
+        from tools.qizheng.engine import QiZhengAnalyzer, analyze_yearly
+        from tools.qizheng.star_tables import resolve_dignity_table
+    except ImportError as exc:
+        display.print_error(
+            f"七政四余功能需要安装可选依赖 pyswisseph："
+            f"\n  pip install -r requirements-qizheng.txt\n原始错误：{exc}"
+        )
+        return
+
+    ai_cfg = config.get("bazi_ai") or {}
+
+    def _resolve_chart_input(value: Optional[str]) -> Dict[str, Any]:
+        """Return chart_info for the qizheng engine."""
+        if value:
+            chart = value.strip()
+            return {"bazi": chart, "chart": chart}
+        if args.qizheng_birth_datetime:
+            raw = args.qizheng_birth_datetime.strip()
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            try:
+                dt = _dt.fromisoformat(raw)
+            except ValueError as exc:
+                display.print_error(f"无效的出生时间：{exc}")
+                raise SystemExit(1) from exc
+            if args.qizheng_latitude is None or args.qizheng_longitude is None:
+                display.print_error("使用出生时间时必须同时提供 --qizheng-latitude 和 --qizheng-longitude")
+                raise SystemExit(1)
+            return {
+                "birth_datetime": dt.isoformat(),
+                "latitude": args.qizheng_latitude,
+                "longitude": args.qizheng_longitude,
+                "timezone_offset": args.qizheng_timezone_offset,
+                "precession_mode": args.qizheng_precession_mode,
+            }
+        display.print_error("必须提供八字或出生时间+经纬度")
+        raise SystemExit(1)
+
+    dignity_table = resolve_dignity_table(args.qizheng_dignity_table)
+
+    if args.analyze_qizheng is not None:
+        chart_info = _resolve_chart_input(args.analyze_qizheng)
+        analyzer = QiZhengAnalyzer(
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
+            cases_path=Path("./tools/qizheng/cases.jsonl"),
+            dignity_table=dignity_table,
+        )
+        display.print_info("正在做七政四余分析...")
+        result = await analyzer.analyze(chart_info, question=args.qizheng_question)
+        if result.get("_mock"):
+            display.print_warning("未配置 DEEPSEEK_API_KEY，仅返回基础结构与相似案例检索结果")
+        display.print_info(json.dumps(result, ensure_ascii=False, indent=2))
+
+    if args.qizheng_yearly is not None:
+        chart_info = _resolve_chart_input(args.qizheng_yearly)
+        bazi = chart_info.get("bazi") or chart_info.get("chart", "")
+        birth_year = args.qizheng_birth_year or None
+        if birth_year == 0:
+            birth_year = None
+        if birth_year is None and args.qizheng_birth_datetime:
+            try:
+                raw = args.qizheng_birth_datetime.strip()
+                if raw.endswith("Z"):
+                    raw = raw[:-1] + "+00:00"
+                birth_year = _dt.fromisoformat(raw).year
+            except ValueError:
+                pass
+        display.print_info("正在做七政四余年运分析...")
+        result = await analyze_yearly(
+            bazi,
+            gender=args.qizheng_gender,
+            birth_year=birth_year,
+            mode=args.qizheng_mode,
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+            rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
+            dignity_table=dignity_table,
+        )
+        display.print_info(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 async def _dispatch_notifications(config: ConfigLoader, total_result: Any, url_count: int) -> None:
     notifier = build_notifier(config)
     if not notifier.enabled:
@@ -540,6 +636,55 @@ def main():
         type=str,
         default="",
         help="配合 --analyze-bazi 使用的具体问题",
+    )
+    parser.add_argument(
+        "--analyze-qizheng",
+        type=str,
+        nargs="?",
+        const="",
+        default=None,
+        metavar="BAZI",
+        help="用 DeepSeek 做七政四余分析；可直接传八字，也可只写 --analyze-qizheng 并配合 --qizheng-birth-datetime 等参数",
+    )
+    parser.add_argument(
+        "--qizheng-yearly",
+        type=str,
+        nargs="?",
+        const="",
+        default=None,
+        metavar="BAZI",
+        help="七政四余年运分析；可直接传八字，也可只写 --qizheng-yearly 并配合 --qizheng-birth-datetime 等参数",
+    )
+    parser.add_argument(
+        "--qizheng-birth-datetime",
+        type=str,
+        default=None,
+        help="出生时间 ISO 格式，例如 1990-05-15T08:00:00",
+    )
+    parser.add_argument("--qizheng-latitude", type=float, default=None, help="出生地点纬度")
+    parser.add_argument("--qizheng-longitude", type=float, default=None, help="出生地点经度")
+    parser.add_argument("--qizheng-timezone-offset", type=float, default=None, help="时区偏移小时数，默认 +8")
+    parser.add_argument(
+        "--qizheng-precession-mode",
+        type=str,
+        default="tropical",
+        help="岁差模式：tropical（默认）、sidereal_lahiri、sidereal_fagan_bradley、sidereal_raman、sidereal_de_luce",
+    )
+    parser.add_argument(
+        "--qizheng-dignity-table",
+        type=str,
+        default="default",
+        choices=["default", "yang"],
+        help="七政四余庙旺 dignity 表：default（默认）或 yang（杨国正派）",
+    )
+    parser.add_argument("--qizheng-question", type=str, default="", help="配合 --analyze-qizheng 使用的具体问题")
+    parser.add_argument("--qizheng-gender", type=str, default="male", help="配合 --qizheng-yearly 使用的性别 male/female")
+    parser.add_argument("--qizheng-birth-year", type=int, default=0, help="配合 --qizheng-yearly 使用的出生年")
+    parser.add_argument(
+        "--qizheng-mode",
+        type=str,
+        default="10y",
+        help="年运模式：10y（默认）或 lifetime",
     )
     try:
         from __init__ import __version__

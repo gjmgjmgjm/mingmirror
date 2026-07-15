@@ -1,0 +1,15 @@
+{"name": "乔布斯", "year": 1985, "domain": "career", "expected": "bad", "event": "与苹果董事会冲突，离开苹果公司"}
+{"name": "乔布斯", "year": 1997, "domain": "career", "expected": "good", "event": "重返苹果，推出Think Different战略"}
+{"name": "乔布斯", "year": 2003, "domain": "health", "expected": "bad", "event": "确诊胰腺神经内分泌肿瘤"}
+{"name": "乔布斯", "year": 2011, "domain": "health", "expected": "bad", "event": "因胰腺癌去世"}
+{"name": "马云", "year": 1999, "domain": "career", "expected": "good", "event": "创办阿里巴巴"}
+{"name": "马云", "year": 2014, "domain": "wealth", "expected": "good", "event": "阿里巴巴纽交所上市"}
+{"name": "马云", "year": 2020, "domain": "career", "expected": "bad", "event": "蚂蚁金服IPO被叫停"}
+{"name": "贝多芬", "year": 1801, "domain": "health", "expected": "bad", "event": "耳聋症状加剧，写下海利根施塔特遗嘱"}
+{"name": "贝多芬", "year": 1824, "domain": "career", "expected": "good", "event": "第九交响曲首演大获成功"}
+{"name": "林肯", "year": 1861, "domain": "career", "expected": "good", "event": "就任美国总统"}
+{"name": "林肯", "year": 1865, "domain": "health", "expected": "bad", "event": "遇刺身亡"}
+{"name": "华盛顿", "year": 1789, "domain": "career", "expected": "good", "event": "就任美国首任总统"}
+{"name": "奥巴马", "year": 2008, "domain": "career", "expected": "good", "event": "当选美国总统"}
+{"name": "奥巴马", "year": 2009, "domain": "career", "expected": "good", "event": "就任美国总统，获诺贝尔和平奖"}
+{"name": "拜登", "year": 2020, "domain": "career", "expected": "good", "event": "当选美国总统"}

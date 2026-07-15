@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { ClipboardList, Plus, RefreshCw } from "lucide-react";
 import { useChart } from "../contexts/ChartContext";
@@ -11,6 +11,7 @@ import {
   type CalibrationResponse,
 } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
+import { SectionCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
 
 const EVENT_TYPE_LABELS: Record<EventType, string> = {
   study: "学业",
@@ -60,7 +61,7 @@ export default function Events() {
   const [happenedAt, setHappenedAt] = useState(todayInputValue);
   const [description, setDescription] = useState("");
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     if (!chart) return;
     setLoading(true);
     setError(null);
@@ -73,11 +74,11 @@ export default function Events() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [chart]);
 
   useEffect(() => {
     loadEvents();
-  }, [chart?.bazi]);
+  }, [loadEvents]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,32 +119,25 @@ export default function Events() {
 
   if (!chart) {
     return (
-      <div className="panel mx-auto max-w-2xl p-8 text-center">
-        <h2 className="mb-4 text-2xl font-semibold text-ink-700 dark:text-ink-200">
-          暂无命盘
-        </h2>
-        <p className="mb-6 text-ink-600 dark:text-ink-400">
-          请先在首页输入八字信息，然后再记录人生事件。
-        </p>
-        <Link to="/" className="btn-primary inline-flex">
-          前往首页
-        </Link>
-      </div>
+      <EmptyState
+        title="暂无命盘"
+        description="请先在首页输入八字信息，然后再记录人生事件。"
+        action={
+          <Link to="/" className="btn-primary inline-flex">
+            前往首页
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <section className="panel p-6 md:p-8">
-        <div className="mb-6">
-          <h1 className="font-display text-3xl text-ink-800 dark:text-ink-100">
-            事件校准
-          </h1>
-          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-            记录真实人生事件，校准命理系统的权重与可信度
-          </p>
-        </div>
-
+      <PageHeader
+        title="事件校准"
+        subtitle="记录真实人生事件，校准命理系统的权重与可信度"
+      />
+      <SectionCard>
         <div className="rounded-xl border border-ink-300/30 bg-ink-100/50 p-4 dark:border-ink-500/30 dark:bg-ink-800/50">
           <p className="text-sm text-ink-700 dark:text-ink-200">
             <span className="font-medium">当前命盘：</span>
@@ -153,13 +147,9 @@ export default function Events() {
             已记录 {events.length} 个事件
           </p>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="panel p-6">
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-          <Plus className="h-5 w-5 text-vermilion" />
-          添加事件
-        </h2>
+      <SectionCard title="添加事件" icon={<Plus className="h-5 w-5 text-vermilion" />}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -169,7 +159,7 @@ export default function Events() {
               <select
                 value={eventType}
                 onChange={(e) => setEventType(e.target.value as EventType)}
-                className="w-full rounded-xl border border-ink-300/50 bg-white px-4 py-2 text-ink-800 outline-none focus:border-vermilion dark:border-ink-600 dark:bg-ink-900 dark:text-ink-100"
+                className="input"
               >
                 {EVENT_TYPES.map((type) => (
                   <option key={type} value={type}>
@@ -187,7 +177,7 @@ export default function Events() {
                 value={happenedAt}
                 onChange={(e) => setHappenedAt(e.target.value)}
                 required
-                className="w-full rounded-xl border border-ink-300/50 bg-white px-4 py-2 text-ink-800 outline-none focus:border-vermilion dark:border-ink-600 dark:bg-ink-900 dark:text-ink-100"
+                className="input"
               />
             </div>
           </div>
@@ -200,7 +190,7 @@ export default function Events() {
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="例如：2020 年 6 月跳槽到某互联网公司担任产品经理"
-              className="w-full rounded-xl border border-ink-300/50 bg-white px-4 py-2 text-ink-800 outline-none focus:border-vermilion dark:border-ink-600 dark:bg-ink-900 dark:text-ink-100"
+              className="input"
             />
           </div>
           <button
@@ -211,23 +201,20 @@ export default function Events() {
             {submitting ? "保存中…" : "添加事件"}
           </button>
         </form>
-      </section>
+      </SectionCard>
 
-      <section className="panel p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-            <ClipboardList className="h-5 w-5 text-vermilion" />
-            已记录事件
-          </h2>
-          <button
-            type="button"
-            onClick={loadEvents}
-            disabled={loading}
-            className="text-sm text-ink-500 hover:text-vermilion disabled:cursor-not-allowed dark:text-ink-400"
-          >
-            刷新
-          </button>
-        </div>
+      <SectionCard
+        title="已记录事件"
+        icon={<ClipboardList className="h-5 w-5 text-vermilion" />}
+      >
+        <button
+          type="button"
+          onClick={loadEvents}
+          disabled={loading}
+          className="mb-4 text-sm text-ink-500 hover:text-vermilion disabled:cursor-not-allowed dark:text-ink-400"
+        >
+          刷新
+        </button>
 
         {loading && <ChartLoader />}
 
@@ -263,9 +250,9 @@ export default function Events() {
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
 
-      <section className="panel p-6">
+      <SectionCard>
         <button
           type="button"
           onClick={handleCalibrate}
@@ -287,21 +274,12 @@ export default function Events() {
         <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
           校准会调用八字与七政四余系统，对比它们对每条事件的预测描述，给出系统得分与建议时辰偏移。
         </p>
-      </section>
+      </SectionCard>
 
-      {error && (
-        <div className="panel border-l-4 border-l-vermilion p-6 text-vermilion dark:border-l-vermilion-light">
-          <p className="font-medium">出错了</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+      {error && <ErrorPanel>{error}</ErrorPanel>}
 
       {result && (
-        <section className="panel animate-chart-section p-6">
-          <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
-            校准结果
-          </h2>
-
+        <SectionCard title="校准结果" delay={100}>
           <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-ink-300/30 bg-ink-100/50 p-4 dark:border-ink-500/30 dark:bg-ink-800/50">
               <p className="text-xs text-ink-500 dark:text-ink-400">事件数</p>
@@ -377,7 +355,7 @@ export default function Events() {
               </div>
             </div>
           )}
-        </section>
+        </SectionCard>
       )}
     </div>
   );

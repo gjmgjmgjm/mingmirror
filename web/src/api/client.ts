@@ -186,11 +186,12 @@ export interface QizhengAnalyzeResponse {
 
 export function analyzeQizheng(
   bazi: string,
-  question: string
+  question: string,
+  dignityTable: "default" | "yang" = "default"
 ): Promise<QizhengAnalyzeResponse> {
   return fetchJson<QizhengAnalyzeResponse>("/qizheng/analyze", {
     method: "POST",
-    body: JSON.stringify({ bazi, question }),
+    body: JSON.stringify({ bazi, question, dignity_table: dignityTable }),
   });
 }
 
@@ -204,11 +205,18 @@ export function analyzeQizhengYearly(
   bazi: string,
   gender: string,
   birthYear: number,
-  mode: "10y" | "lifetime" = "10y"
+  mode: "10y" | "lifetime" = "10y",
+  dignityTable: "default" | "yang" = "default"
 ): Promise<QizhengYearlyResponse> {
   return fetchJson<QizhengYearlyResponse>("/qizheng/yearly", {
     method: "POST",
-    body: JSON.stringify({ bazi, gender, birth_year: birthYear, mode }),
+    body: JSON.stringify({
+      bazi,
+      gender,
+      birth_year: birthYear,
+      mode,
+      dignity_table: dignityTable,
+    }),
   });
 }
 
@@ -305,6 +313,32 @@ export function councilDestiny(
   return fetchJson<DestinyAnalyzeResponse>("/destiny/council", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export interface BaziCase {
+  bazi: string;
+  analysis_corrected?: string;
+  question?: string;
+  tags?: string[];
+}
+
+export interface BaziCasesResponse {
+  cases: BaziCase[];
+}
+
+export function listBaziCases(): Promise<BaziCasesResponse> {
+  return fetchJson<BaziCasesResponse>("/bazi/cases");
+}
+
+export function submitFeedback(
+  bazi: string,
+  correct: boolean,
+  note?: string
+): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>("/bazi/feedback", {
+    method: "POST",
+    body: JSON.stringify({ bazi, correct, note }),
   });
 }
 

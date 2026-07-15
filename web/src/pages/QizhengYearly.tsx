@@ -4,6 +4,13 @@ import { Sparkles, AlertCircle } from "lucide-react";
 import { useChart } from "../contexts/ChartContext";
 import { analyzeQizhengYearly } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
+import {
+  SectionCard,
+  EmptyState,
+  ToggleGroup,
+  PageHeader,
+  ErrorPanel,
+} from "../components/ui";
 
 function formatAge(age: number): string {
   const years = Math.floor(age);
@@ -41,9 +48,15 @@ function parseBirthYear(birthDate?: string): number {
   return Number.isNaN(year) ? 0 : year;
 }
 
+const DIGNITY_OPTIONS: { value: "default" | "yang"; label: string }[] = [
+  { value: "default", label: "默认庙旺表" },
+  { value: "yang", label: "杨国正派" },
+];
+
 export default function QizhengYearly() {
   const { chart } = useChart();
   const [mode, setMode] = useState<"10y" | "lifetime">("10y");
+  const [dignityTable, setDignityTable] = useState<"default" | "yang">("default");
   const [result, setResult] = useState<YearlyResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +74,8 @@ export default function QizhengYearly() {
         chart.bazi,
         chart.gender,
         birthYear,
-        mode
+        mode,
+        dignityTable
       );
       setResult((data.result as YearlyResult) || null);
     } catch (err) {
@@ -74,52 +88,50 @@ export default function QizhengYearly() {
 
   if (!chart) {
     return (
-      <div className="panel mx-auto max-w-2xl p-8 text-center">
-        <h2 className="mb-4 text-2xl font-semibold text-ink-700 dark:text-ink-200">
-          暂无命盘
-        </h2>
-        <p className="mb-6 text-ink-600 dark:text-ink-400">
-          请先在首页输入八字信息，然后再进行七政大运流年精排。
-        </p>
-        <Link to="/" className="btn-primary inline-flex">
-          前往首页
-        </Link>
-      </div>
+      <EmptyState
+        title="暂无命盘"
+        description="请先在首页输入八字信息，然后再进行七政大运流年精排。"
+        action={
+          <Link to="/" className="btn-primary inline-flex">
+            前往首页
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <section className="panel p-6 md:p-8">
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="font-display text-3xl text-ink-800 dark:text-ink-100">
-              七政大运流年
-            </h1>
-            <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-              以七政四余推演大运与流年运势走势
-            </p>
-          </div>
-          <div className="inline-flex rounded-xl border border-ink-300/40 bg-ink-100/50 p-1 dark:border-ink-500/40 dark:bg-ink-800/50">
-            {[
-              { value: "10y", label: "未来10年" },
-              { value: "lifetime", label: "看到80岁" },
-            ].map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setMode(m.value as "10y" | "lifetime")}
-                className={`rounded-lg px-4 py-1.5 text-sm transition ${
-                  mode === m.value
-                    ? "bg-white text-ink-800 shadow-sm dark:bg-ink-700 dark:text-ink-100"
-                    : "text-ink-500 dark:text-ink-400"
-                }`}
+      <SectionCard>
+        <PageHeader
+          title="七政大运流年"
+          subtitle="以七政四余推演大运与流年运势走势"
+          action={
+            <div className="flex items-center gap-3">
+              <select
+                value={dignityTable}
+                onChange={(e) =>
+                  setDignityTable(e.target.value as "default" | "yang")
+                }
+                className="input text-sm"
               >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
+                {DIGNITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <ToggleGroup
+                options={[
+                  { value: "10y", label: "未来10年" },
+                  { value: "lifetime", label: "看到80岁" },
+                ]}
+                value={mode}
+                onChange={setMode}
+              />
+            </div>
+          }
+        />
 
         {!hasBirthInfo && (
           <div className="mb-4 flex items-start gap-3 rounded-xl bg-gold/10 p-4 text-sm text-gold dark:bg-gold/20">
@@ -148,30 +160,18 @@ export default function QizhengYearly() {
             </>
           )}
         </button>
-      </section>
+      </SectionCard>
 
       {loading && <ChartLoader />}
 
-      {error && (
-        <div className="panel border-l-4 border-l-vermilion p-6 text-vermilion dark:border-l-vermilion-light">
-          <p className="font-medium">分析出错</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+      {error && <ErrorPanel title="分析出错">{error}</ErrorPanel>}
 
-      {result?.error && (
-        <div className="panel border-l-4 border-l-vermilion p-6 text-vermilion dark:border-l-vermilion-light">
-          <p className="font-medium">{result.error}</p>
-        </div>
-      )}
+      {result?.error && <ErrorPanel>{result.error}</ErrorPanel>}
 
       {result && !result.error && (
         <div className="space-y-6">
           {result.dayun_summary && result.dayun_summary.length > 0 && (
-            <section className="panel p-6 animate-chart-section">
-              <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
-                大运主题
-              </h2>
+            <SectionCard title="大运主题" delay={0}>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {result.dayun_summary.map((d, idx) => (
                   <div
@@ -195,14 +195,11 @@ export default function QizhengYearly() {
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionCard>
           )}
 
           {result.yearly_analysis && result.yearly_analysis.length > 0 && (
-            <section className="panel p-6 animate-chart-section">
-              <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
-                逐年流年
-              </h2>
+            <SectionCard title="逐年流年" delay={150}>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {result.yearly_analysis.map((y, idx) => (
                   <div
@@ -232,19 +229,16 @@ export default function QizhengYearly() {
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionCard>
           )}
 
           {result.overall_guidance && (
-            <section className="panel relative overflow-hidden p-6 animate-chart-section">
+            <SectionCard title="综合建议" delay={300}>
               <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gold/10 blur-2xl" />
-              <h2 className="mb-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-                综合建议
-              </h2>
               <p className="leading-relaxed text-ink-700 dark:text-ink-200">
                 {result.overall_guidance}
               </p>
-            </section>
+            </SectionCard>
           )}
 
           {(() => {
@@ -261,29 +255,15 @@ export default function QizhengYearly() {
                 (c) => !techMarkers.some((m) => c.includes(m))
               ) || [];
             return visibleCaveats.length > 0 ? (
-              <section className="panel border-l-4 border-l-gold p-6 animate-chart-section">
-                <h2 className="mb-2 text-lg font-semibold text-ink-700 dark:text-ink-200">
-                  注意事项
-                </h2>
+              <SectionCard title="注意事项" borderLeft="gold" delay={450}>
                 <ul className="list-inside list-disc space-y-1 text-sm text-ink-600 dark:text-ink-300">
                   {visibleCaveats.map((c, idx) => (
                     <li key={idx}>{c}</li>
                   ))}
                 </ul>
-              </section>
+              </SectionCard>
             ) : null;
           })()}
-
-          <style>{`
-            @keyframes chart-section-enter {
-              0% { opacity: 0; transform: translateY(16px); }
-              100% { opacity: 1; transform: translateY(0); }
-            }
-            .animate-chart-section {
-              opacity: 0;
-              animation: chart-section-enter 0.5s ease-out forwards;
-            }
-          `}</style>
         </div>
       )}
     </div>

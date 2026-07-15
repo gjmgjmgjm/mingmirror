@@ -138,3 +138,34 @@ class TestRuleBasedYearly:
     async def test_retrieve_empty(self, tmp_path: Path):
         results = await retrieve_similar_cases("甲子 丙寅 戊辰 庚午", "", tmp_path / "missing.jsonl", top_k=3)
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_retrieve_excludes_matched_cases(self, tmp_path: Path):
+        cases_path = tmp_path / "cases.jsonl"
+        cases_path.write_text(
+            json.dumps({
+                "bazi": "乙卯 戊寅 庚子 丙子",
+                "source_video": "P001",
+                "analysis_corrected": "庚金日主，伤官格",
+                "key_terms": ["伤官"],
+                "conclusions": [],
+            }, ensure_ascii=False)
+            + "\n"
+            + json.dumps({
+                "bazi": "甲申 癸酉 壬子 甲辰",
+                "source_video": "P002",
+                "analysis_corrected": "壬水日主",
+                "key_terms": ["身旺"],
+                "conclusions": [],
+            }, ensure_ascii=False)
+            + "\n"
+        )
+        results = await retrieve_similar_cases(
+            "乙卯 戊寅 庚子 丙子",
+            "问事业",
+            cases_path,
+            top_k=1,
+            exclude_case_matcher=lambda c: c.get("source_video") == "P001",
+        )
+        assert len(results) == 1
+        assert results[0]["source_video"] == "P002"

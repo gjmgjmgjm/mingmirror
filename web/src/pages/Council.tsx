@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useChart } from "../contexts/ChartContext";
 import { councilDestiny, type DestinyAnalyzeResponse } from "../api/client";
 import CouncilLoader from "../components/CouncilLoader";
+import { SectionCard, InfoCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
 
 const SYSTEMS = [
   { id: "bazi", label: "八字" },
@@ -81,26 +82,25 @@ export default function Council() {
 
   if (!chart) {
     return (
-      <div className="panel mx-auto max-w-2xl p-8 text-center">
-        <h2 className="mb-4 text-2xl font-semibold text-ink-700 dark:text-ink-200">
-          暂无命盘
-        </h2>
-        <p className="mb-6 text-ink-600 dark:text-ink-400">
-          请先在首页输入八字信息，然后再召集命理议会。
-        </p>
-        <Link to="/" className="btn-primary inline-flex">
-          前往首页
-        </Link>
-      </div>
+      <EmptyState
+        title="暂无命盘"
+        description="请先在首页输入八字信息，然后再召集命理议会。"
+        action={
+          <Link to="/" className="btn-primary inline-flex">
+            前往首页
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <section className="panel p-6 md:p-8">
-        <h1 className="mb-6 font-display text-3xl text-ink-800 dark:text-ink-100">
-          命理议会
-        </h1>
+      <PageHeader
+        title="命理议会"
+        subtitle="召集八字、紫微、七政四余多体系共同议事"
+      />
+      <SectionCard>
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <span className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300">
@@ -174,27 +174,17 @@ export default function Council() {
             {loading ? "议会审议中……" : "召集议会"}
           </button>
         </form>
-      </section>
+      </SectionCard>
 
       {loading && <CouncilLoader systems={selectedSystems} />}
 
-      {error && (
-        <div className="panel border-l-4 border-l-vermilion p-6 text-vermilion dark:border-l-vermilion-light">
-          <p className="font-medium">议会出错</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+      {error && <ErrorPanel title="议会出错">{error}</ErrorPanel>}
 
       {result && (
         <div className="space-y-6">
-          <section
-            className="panel p-6 animate-council-section"
-            style={{ animationDelay: "0ms" }}
-          >
+          <SectionCard title="各体系观点" delay={0}>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-ink-700 dark:text-ink-200">
-                各体系观点
-              </h2>
+              <span />
               <span className="text-sm text-ink-500 dark:text-ink-400">
                 策略：{STRATEGIES.find((s) => s.id === result.strategy)?.label ?? result.strategy ?? "single"}
               </span>
@@ -228,89 +218,32 @@ export default function Council() {
                 </div>
               ))}
             </div>
-          </section>
+          </SectionCard>
 
-          <section
-            className="panel border-l-4 border-l-jade p-6 animate-council-section"
-            style={{ animationDelay: "200ms" }}
-          >
-            <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
-              议会共识
-            </h2>
+          <SectionCard title="议会共识" borderLeft="jade" delay={200}>
             <div className="grid gap-4 sm:grid-cols-2">
               {Object.entries(result.aligned).map(([domain, entry], index) => {
                 if (!entry || !entry.consensus) return null;
                 return (
-                  <div
+                  <InfoCard
                     key={domain}
-                    className="rounded-xl bg-ink-100/60 p-4 dark:bg-ink-800/60 animate-council-card"
-                    style={{ animationDelay: `${index * 60 + 300}ms` }}
-                  >
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="font-medium text-ink-700 dark:text-ink-200">
-                        {DOMAIN_LABELS[domain] ?? domain}
-                      </span>
-                      <span className="text-xs text-gold">
-                        {CONFIDENCE_LABELS[entry.confidence] ?? entry.confidence}
-                      </span>
-                    </div>
-                    <p className="text-sm text-ink-600 dark:text-ink-300">
-                      {entry.consensus}
-                    </p>
-                  </div>
+                    label={`${DOMAIN_LABELS[domain] ?? domain} · ${CONFIDENCE_LABELS[entry.confidence] ?? entry.confidence}`}
+                    value={entry.consensus}
+                    delay={index * 60 + 300}
+                  />
                 );
               })}
             </div>
-          </section>
+          </SectionCard>
 
-          <section
-            className="panel border-l-4 border-l-gold p-6 animate-council-section"
-            style={{ animationDelay: "400ms" }}
-          >
-            <h2 className="mb-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-              最终总结
-            </h2>
+          <SectionCard title="最终总结" borderLeft="gold" delay={400}>
             <p className="whitespace-pre-wrap text-ink-600 dark:text-ink-300">
               {result.final_summary}
             </p>
             <div className="mt-4 inline-block rounded-lg bg-gold/10 px-3 py-1 text-sm text-gold dark:bg-gold/20">
               整体置信度：{CONFIDENCE_LABELS[result.overall_confidence] ?? result.overall_confidence}
             </div>
-          </section>
-
-          <style>{`
-            @keyframes council-section-enter {
-              0% {
-                opacity: 0;
-                transform: translateY(16px);
-              }
-              100% {
-                opacity: 1;
-                transform: translateY(0);
-              }
-            }
-
-            @keyframes council-card-enter {
-              0% {
-                opacity: 0;
-                transform: scale(0.96) translateY(12px);
-              }
-              100% {
-                opacity: 1;
-                transform: scale(1) translateY(0);
-              }
-            }
-
-            .animate-council-section {
-              opacity: 0;
-              animation: council-section-enter 0.5s ease-out forwards;
-            }
-
-            .animate-council-card {
-              opacity: 0;
-              animation: council-card-enter 0.45s ease-out forwards;
-            }
-          `}</style>
+          </SectionCard>
         </div>
       )}
     </div>

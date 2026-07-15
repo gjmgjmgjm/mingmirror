@@ -33,9 +33,12 @@ Standalone utility scripts — not part of the core download pipeline.
 | `bazi_ai/evaluator.py` | Consistency, format, case overlap, and leave-one-out benchmark evaluator |
 | `bazi_ai/benchmark.py` | CLI wrapper for `evaluate_leave_one_out()` |
 | `bazi_ai/cli.py` | Standalone CLI for `python -m tools.bazi_ai.cli` |
-| `qizheng/engine.py` | Qi Zheng Si Yu analyzer with natal / yearly interpretation |
-| `qizheng/calendar.py` | Astronomical calendar utilities for Qi Zheng calculations |
-| `qizheng/prompts.py` | System and user prompts for Qi Zheng LLM analysis |
+| `qizheng/engine.py` | Qi Zheng Si Yu analyzer; primary input is `birth_datetime + latitude/longitude`, with `chart`/`bazi` kept for compatibility |
+| `qizheng/calendar.py` | Traditional palace layout from a four-pillar string plus optional real astronomical merge (`astro_structural_profile`) |
+| `qizheng/prompts.py` | System and user prompts that inject computed astro/structural facts as the single source of truth |
+| `qizheng/star_tables.py` | Static reference tables: 28 ancient mansions (郑案古宿), body elements, dignities, aspects, pattern catalog |
+| `qizheng/astronomy.py` | Swiss Ephemeris wrapper for the seven governors, four remainders, ascendant, houses, and mansions; supports `precession_mode` (tropical / sidereal_lahiri / sidereal_fagan_bradley / sidereal_raman / sidereal_de_luce) for 28-mansion lookup |
+| `qizheng/patterns.py` | Geometric aspect and classical pattern detection from computed longitudes/houses |
 | `ziwei/engine.py` | Zi Wei Dou Shu analyzer |
 | `ziwei/prompts.py` | System and user prompts for Zi Wei LLM analysis |
 | `destiny/ensemble.py` | Multi-destiny analyzer with pluggable agent strategies |
@@ -59,7 +62,11 @@ Standalone utility scripts — not part of the core download pipeline.
   - Optional LLM packages for `build_knowledge_base_v3.py` AI analysis
 - Bazi utilities are standalone; `tools/bazi_ai/` is now stable (validator, structural parser, calendar, RAG, embeddings, annotator, rule_checker, ensemble, REST API)
 - `tools/bazi_ai/build_yangyan_kb.py` produces `bazi_knowledge/cases_yangyan.jsonl`; raw research materials are gitignored
-- Destiny analyzers (`tools/ziwei/`, `tools/qizheng/`, `tools/destiny/`) are optional and currently rely on core dependencies only; `requirements-destiny.txt` is a placeholder
+- `tools/qizheng/` requires `pyswisseph` for real astronomical calculations; install with `pip install -r requirements-qizheng.txt`. Code gracefully falls back to the traditional four-pillar profile when the dependency is missing.
+- REST endpoints `/api/v1/qizheng/analyze` and `/api/v1/qizheng/yearly` accept either a `bazi` string or `birth_datetime + latitude + longitude`, plus an optional `precession_mode` (tropical / sidereal_lahiri / ...).
+- CLI flags `--analyze-qizheng` and `--qizheng-yearly` support the same input forms; use `--qizheng-birth-datetime`, `--qizheng-latitude`, `--qizheng-longitude`, etc.
+- Benchmark data for qizheng lives in `tools/qizheng/benchmark_data/celebrity_charts.jsonl` and is exercised by `tests/test_qizheng_benchmark.py`.
+- Destiny analyzers (`tools/ziwei/`, `tools/qizheng/`, `tools/destiny/`) are optional; `requirements-destiny.txt` is a placeholder for ziwei/destiny extras
 - `tools/destiny/strategies/` provides agent strategies: `reflection.py`, `debate.py`, `tool_caller.py`, `retriever.py`
 - `tools/destiny/benchmark_v2.py` runs quantitative evaluation against `tools/destiny/benchmark_data/annotated_cases.jsonl` and writes `benchmark_report.json`
 - `tools/destiny/ensemble.py` supports `strategy="single"|"reflection"|"debate"|"tool_augmented"`; default remains `"single"`
@@ -73,7 +80,7 @@ Standalone utility scripts — not part of the core download pipeline.
 - Tests: `tests/test_bazi_cli.py` covers the reusable backend
 - Tests: `tests/test_bazi_validator.py`, `tests/test_bazi_ai.py`, `tests/test_bazi_ai_evaluator.py` cover validation, RAG, and evaluation
 - Tests: `tests/test_bazi_calendar.py` covers lunar-calendar / solar-term utilities
-- Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_qizheng_calendar.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
+- Tests: `tests/test_ziwei_engine.py`, `tests/test_qizheng_engine.py`, `tests/test_qizheng_calendar.py`, `tests/test_qizheng_astronomy.py`, `tests/test_qizheng_astronomy_validation.py`, `tests/test_qizheng_benchmark.py`, `tests/test_qizheng_cross_reference.py`, `tests/test_server_qizheng.py`, `tests/test_cli_qizheng.py`, `tests/test_destiny_*.py` cover the multi-destiny subsystem
 - Tests: `tests/test_destiny_reflection.py`, `tests/test_destiny_debate.py`, `tests/test_destiny_benchmark_v2.py` cover the new agent strategies and benchmark
 - Tests: `tests/test_destiny_calibrator.py` covers event scoring, storage, and calibration aggregation
 - Tests: `tests/test_destiny_script_writer.py` covers character card, chapters, and fallback generation
@@ -93,5 +100,6 @@ Standalone utility scripts — not part of the core download pipeline.
 - `playwright` — browser automation (optional dependency)
 - `rapidocr-onnxruntime` — OCR for bazi extraction (optional, not in core requirements)
 - DeepSeek API Key — for `bazi_ai/engine.py` (optional; falls back to mock mode without a key)
+- `pyswisseph` — Swiss Ephemeris binding for `tools/qizheng/astronomy.py` (optional; install via `requirements-qizheng.txt`)
 
 <!-- MANUAL: -->

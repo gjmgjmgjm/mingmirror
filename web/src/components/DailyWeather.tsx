@@ -158,76 +158,7 @@ export default function DailyWeather({ bazi, animate = false }: DailyWeatherProp
         </div>
       </div>
 
-      {animate && (
-        <style>{`
-          @keyframes weather-enter {
-            0% {
-              opacity: 0;
-              transform: translateY(20px) scale(0.98);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
 
-          @keyframes weather-icon {
-            0% {
-              transform: scale(0) rotate(-45deg);
-              opacity: 0;
-            }
-            60% {
-              transform: scale(1.1) rotate(10deg);
-            }
-            100% {
-              transform: scale(1) rotate(0deg);
-              opacity: 1;
-            }
-          }
-
-          @keyframes weather-pillar {
-            0% {
-              opacity: 0;
-              transform: translateY(12px) scale(0.9);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-
-          @keyframes weather-list {
-            0% {
-              opacity: 0;
-              transform: translateX(-12px);
-            }
-            100% {
-              opacity: 1;
-              transform: translateX(0);
-            }
-          }
-
-          .animate-weather-enter {
-            opacity: 0;
-            animation: weather-enter 0.6s ease-out forwards;
-          }
-
-          .animate-weather-icon {
-            opacity: 0;
-            animation: weather-icon 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-          }
-
-          .animate-weather-pillar {
-            opacity: 0;
-            animation: weather-pillar 0.45s ease-out forwards;
-          }
-
-          .animate-weather-list {
-            opacity: 0;
-            animation: weather-list 0.45s ease-out forwards;
-          }
-        `}</style>
-      )}
     </div>
   );
 }

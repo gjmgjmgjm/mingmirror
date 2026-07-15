@@ -4,6 +4,7 @@ import { BookOpen, Sparkles, Sword, Shield, Map } from "lucide-react";
 import { useChart } from "../contexts/ChartContext";
 import { fetchDestinyScript, type DestinyScriptResponse } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
+import { SectionCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
 
 function parseBirthYear(birthDate?: string): number {
   if (!birthDate) return 1990;
@@ -46,17 +47,15 @@ export default function Script() {
 
   if (!chart) {
     return (
-      <div className="panel mx-auto max-w-2xl p-8 text-center">
-        <h2 className="mb-4 text-2xl font-semibold text-ink-700 dark:text-ink-200">
-          暂无命盘
-        </h2>
-        <p className="mb-6 text-ink-600 dark:text-ink-400">
-          请先在首页输入八字信息，然后再生成命运剧本。
-        </p>
-        <Link to="/" className="btn-primary inline-flex">
-          前往首页
-        </Link>
-      </div>
+      <EmptyState
+        title="暂无命盘"
+        description="请先在首页输入八字信息，然后再生成命运剧本。"
+        action={
+          <Link to="/" className="btn-primary inline-flex">
+            前往首页
+          </Link>
+        }
+      />
     );
   }
 
@@ -64,16 +63,11 @@ export default function Script() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <section className="panel p-6 md:p-8">
-        <div className="mb-6">
-          <h1 className="font-display text-3xl text-ink-800 dark:text-ink-100">
-            命运剧本
-          </h1>
-          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-            把你的八字变成一份人生 RPG 攻略
-          </p>
-        </div>
-
+      <PageHeader
+        title="命运剧本"
+        subtitle="把你的八字变成一份人生 RPG 攻略"
+      />
+      <SectionCard>
         <button
           type="button"
           onClick={handleGenerate}
@@ -92,33 +86,28 @@ export default function Script() {
             </>
           )}
         </button>
-      </section>
+      </SectionCard>
 
       {loading && <ChartLoader />}
 
-      {error && (
-        <div className="panel border-l-4 border-l-vermilion p-6 text-vermilion dark:border-l-vermilion-light">
-          <p className="font-medium">生成出错</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+      {error && <ErrorPanel title="生成出错">{error}</ErrorPanel>}
 
       {script && (
         <div className="space-y-6">
           {script.opening && (
-            <section className="panel p-6 animate-chart-section">
+            <SectionCard delay={0}>
               <p className="text-lg leading-relaxed text-ink-700 dark:text-ink-200">
                 “{script.opening}”
               </p>
-            </section>
+            </SectionCard>
           )}
 
           {card && (
-            <section className="panel p-6 animate-chart-section">
-              <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-                <BookOpen className="h-5 w-5 text-vermilion" />
-                角色卡
-              </h2>
+            <SectionCard
+              title="角色卡"
+              icon={<BookOpen className="h-5 w-5 text-vermilion" />}
+              delay={100}
+            >
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border border-ink-300/20 bg-ink-100/40 p-4 dark:border-ink-500/20 dark:bg-ink-800/40">
                   <div className="text-xs text-ink-500 dark:text-ink-400">日主</div>
@@ -206,15 +195,15 @@ export default function Script() {
                   </div>
                 </div>
               )}
-            </section>
+            </SectionCard>
           )}
 
           {script.chapters && script.chapters.length > 0 && (
-            <section className="panel p-6 animate-chart-section">
-              <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-ink-700 dark:text-ink-200">
-                <Map className="h-5 w-5 text-vermilion" />
-                人生章节
-              </h2>
+            <SectionCard
+              title="人生章节"
+              icon={<Map className="h-5 w-5 text-vermilion" />}
+              delay={200}
+            >
               <div className="space-y-4">
                 {script.chapters.map((chapter, index) => (
                   <div
@@ -270,15 +259,15 @@ export default function Script() {
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionCard>
           )}
 
           {script.closing && (
-            <section className="panel p-6 animate-chart-section">
+            <SectionCard delay={300}>
               <p className="text-center text-lg leading-relaxed text-ink-600 dark:text-ink-300">
                 {script.closing}
               </p>
-            </section>
+            </SectionCard>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ import {
   Settings2,
   ChevronDown,
 } from "lucide-react";
+import { SealStamp, ErrorPanel } from "../components/ui";
 import { useChart, type ChartInfo, type LocationInfo } from "../contexts/ChartContext";
 import { parseBazi } from "../lib/bazi";
 import { baziFromDatetime } from "../api/client";
@@ -58,6 +59,16 @@ function buildDate(year: string, month: string, day: string) {
 function buildTime(hour: string, minute: string) {
   if (hour === "" || minute === "") return "";
   return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+}
+
+function formatPreviewError(message: string): string {
+  if (message.includes("502") || message.includes("503") || message.includes("Failed to fetch")) {
+    return "后端服务未启动或暂时不可用，请检查 server 是否运行（python -m server.app --serve）";
+  }
+  if (message.includes("400") || message.includes("422")) {
+    return "日期或时间格式有误，请检查是否为真实存在的日期";
+  }
+  return message;
 }
 
 function getNowParts() {
@@ -125,6 +136,7 @@ export default function Dashboard() {
   const [locateError, setLocateError] = useState<string | null>(null);
 
   const [useManualBazi, setUseManualBazi] = useState(false);
+  const [locationExpanded, setLocationExpanded] = useState(false);
 
   // Debounced bazi preview when date/time/calendar changes.
   useEffect(() => {
@@ -243,22 +255,26 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="relative mx-auto max-w-5xl space-y-8">
-      <section className="relative panel mesh-bg px-6 py-12 text-center md:px-12 animate-fade-up overflow-hidden">
-        <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full border border-vermilion/20 opacity-40 animate-orbit-slow" aria-hidden="true" />
-        <div className="pointer-events-none absolute -left-6 bottom-0 h-24 w-24 rounded-full border border-gold/20 opacity-40 animate-orbit-slow-reverse" aria-hidden="true" />
-        <h1 className="mb-4 font-display text-4xl text-ink-800 dark:text-ink-100 md:text-5xl">
-          生成你的命运数字孪生
-        </h1>
-        <p className="mx-auto max-w-2xl text-ink-600 dark:text-ink-300">
+    <div className="relative mx-auto max-w-5xl space-y-6">
+      <section className="relative overflow-hidden rounded-2xl border border-vermilion/10 bg-gradient-to-br from-white/90 via-ink-100/90 to-white/90 px-5 py-5 text-center shadow-lg backdrop-blur-sm dark:border-vermilion/20 dark:from-ink-800/90 dark:via-ink-900/90 dark:to-ink-800/90 md:px-8">
+        <div className="pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full border border-vermilion/20 opacity-50 animate-orbit-slow" aria-hidden="true" />
+        <div className="pointer-events-none absolute -left-3 bottom-0 h-14 w-14 rounded-full border border-gold/20 opacity-50 animate-orbit-slow-reverse" aria-hidden="true" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(circle,rgba(201,162,39,0.08),transparent_60%)]" aria-hidden="true" />
+        <div className="relative mb-2 flex items-center justify-center gap-3">
+          <SealStamp size="sm" variant="vermilion">命镜</SealStamp>
+          <h1 className="font-display text-2xl text-ink-800 dark:text-ink-100 md:text-3xl">
+            生成你的命运数字孪生
+          </h1>
+        </div>
+        <p className="relative mx-auto max-w-2xl text-xs text-ink-600 dark:text-ink-300 md:text-sm">
           输入出生时间、地点与性别，命镜将自动推导出八字，并为你构建可交互、可推演、可对比的个人命运模型。
         </p>
       </section>
 
-      <section className="panel mesh-bg p-6 md:p-8">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="form-group">
-            <label className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300">
+      <section className="panel p-4 md:p-5">
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="form-group flex items-center gap-4">
+            <label className="text-sm font-medium text-ink-600 dark:text-ink-300">
               历法
             </label>
             <div
@@ -286,7 +302,7 @@ export default function Dashboard() {
           </div>
 
           <div className="form-group">
-            <label className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300">
+            <label className="mb-1 block text-sm font-medium text-ink-600 dark:text-ink-300">
               {calendarType === "lunar" ? "农历出生日期" : "公历出生日期"}
             </label>
             <div className="flex gap-3">
@@ -296,6 +312,7 @@ export default function Dashboard() {
                 onChange={setBirthYear}
                 label="年"
                 disabled={useManualBazi}
+                visibleItems={3}
               />
               <WheelPicker
                 options={MONTH_OPTIONS}
@@ -303,6 +320,7 @@ export default function Dashboard() {
                 onChange={setBirthMonth}
                 label="月"
                 disabled={useManualBazi}
+                visibleItems={3}
               />
               <WheelPicker
                 options={DAY_OPTIONS}
@@ -310,12 +328,13 @@ export default function Dashboard() {
                 onChange={setBirthDay}
                 label="日"
                 disabled={useManualBazi}
+                visibleItems={3}
               />
             </div>
           </div>
 
           <div className="form-group">
-            <label className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300">
+            <label className="mb-1 block text-sm font-medium text-ink-600 dark:text-ink-300">
               出生时间
             </label>
             <div className="flex gap-3 md:w-2/3">
@@ -325,6 +344,7 @@ export default function Dashboard() {
                 onChange={setBirthHour}
                 label="时"
                 disabled={timeUnknown}
+                visibleItems={3}
               />
               <WheelPicker
                 options={MINUTE_OPTIONS}
@@ -332,6 +352,7 @@ export default function Dashboard() {
                 onChange={setBirthMinute}
                 label="分"
                 disabled={timeUnknown}
+                visibleItems={3}
               />
             </div>
             <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink-500 dark:text-ink-400">
@@ -357,7 +378,7 @@ export default function Dashboard() {
           </div>
 
           <div className="form-group">
-            <label className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300">
+            <label className="mb-1 block text-sm font-medium text-ink-600 dark:text-ink-300">
               性别
             </label>
             <div className="inline-flex gap-2 rounded-2xl border border-ink-300/40 bg-ink-100/50 p-1.5 dark:border-ink-500/40 dark:bg-ink-800/50">
@@ -381,69 +402,94 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="form-group space-y-3 rounded-2xl border border-ink-300/20 bg-ink-100/30 p-4 dark:border-ink-500/20 dark:bg-ink-800/30">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-sm font-medium text-ink-600 dark:text-ink-300">
+          <div className="form-group rounded-2xl border border-ink-300/20 bg-ink-100/30 p-3 dark:border-ink-500/20 dark:bg-ink-800/30">
+            <button
+              type="button"
+              onClick={() => setLocationExpanded((v) => !v)}
+              className="flex w-full items-center justify-between"
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-ink-600 dark:text-ink-300">
                 <MapPin className="h-4 w-4 floating-icon" />
                 出生地点
-              </label>
-              <button
-                type="button"
-                onClick={handleLocate}
-                disabled={locating}
-                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-ink-500 transition hover:bg-ink-200 disabled:opacity-50 dark:text-ink-400 dark:hover:bg-ink-700"
-                title="使用当前位置"
-              >
-                <LocateFixed className="h-3 w-3" />
-                {locating ? "定位中" : "自动定位"}
-              </button>
-            </div>
-
-            {locateError && (
-              <p className="text-xs text-vermilion">{locateError}</p>
-            )}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <input
-                type="text"
-                value={locationName}
-                onChange={(e) => setLocationName(e.target.value)}
-                placeholder="城市 / 地区，例如：北京"
-                className="input input-glow"
+                <span className="text-xs font-normal text-ink-400 dark:text-ink-500">
+                  {locationName} · {TIMEZONE_OPTIONS.find((t) => t.value === timezone)?.label.split(" / ")[0] ?? timezone.split("/").pop()}
+                </span>
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-ink-400 transition-transform dark:text-ink-500 ${
+                  locationExpanded ? "rotate-180" : ""
+                }`}
               />
-              <div className="relative">
-                <select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="input input-glow appearance-none pr-10"
-                >
-                  {TIMEZONE_OPTIONS.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400 dark:text-ink-500" />
+            </button>
+
+            <div
+              className={`grid transition-all duration-300 ${
+                locationExpanded
+                  ? "mt-3 grid-rows-[1fr] opacity-100"
+                  : "grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className="overflow-hidden space-y-3">
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={handleLocate}
+                    disabled={locating}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-ink-500 transition hover:bg-ink-200 disabled:opacity-50 dark:text-ink-400 dark:hover:bg-ink-700"
+                    title="使用当前位置"
+                  >
+                    <LocateFixed className="h-3 w-3" />
+                    {locating ? "定位中" : "自动定位"}
+                  </button>
+                </div>
+
+                {locateError && (
+                  <p className="text-xs text-vermilion">{locateError}</p>
+                )}
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input
+                    type="text"
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                    placeholder="城市 / 地区，例如：北京"
+                    className="input input-glow"
+                  />
+                  <div className="relative">
+                    <select
+                      value={timezone}
+                      onChange={(e) => setTimezone(e.target.value)}
+                      className="input input-glow appearance-none pr-10"
+                    >
+                      {TIMEZONE_OPTIONS.map((tz) => (
+                        <option key={tz.value} value={tz.value}>
+                          {tz.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400 dark:text-ink-500" />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={longitude}
+                    onChange={(e) => setLongitude(Number(e.target.value))}
+                    placeholder="经度"
+                    className="input input-glow"
+                  />
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={latitude}
+                    onChange={(e) => setLatitude(Number(e.target.value))}
+                    placeholder="纬度"
+                    className="input input-glow"
+                  />
+                </div>
               </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <input
-                type="number"
-                step="0.0001"
-                value={longitude}
-                onChange={(e) => setLongitude(Number(e.target.value))}
-                placeholder="经度"
-                className="input input-glow"
-              />
-              <input
-                type="number"
-                step="0.0001"
-                value={latitude}
-                onChange={(e) => setLatitude(Number(e.target.value))}
-                placeholder="纬度"
-                className="input input-glow"
-              />
             </div>
           </div>
 
@@ -462,7 +508,7 @@ export default function Dashboard() {
             <div className="form-group">
               <label
                 htmlFor="manualBazi"
-                className="mb-2 block text-sm font-medium text-ink-600 dark:text-ink-300"
+                className="mb-1 block text-sm font-medium text-ink-600 dark:text-ink-300"
               >
                 四柱八字
               </label>
@@ -478,15 +524,11 @@ export default function Dashboard() {
             </div>
           )}
 
-          {deriveError && (
-            <div className="form-group rounded-xl bg-vermilion/10 px-4 py-3 text-sm text-vermilion dark:bg-vermilion/20">
-              {deriveError}
-            </div>
-          )}
+          {deriveError && <ErrorPanel>{deriveError}</ErrorPanel>}
 
           {!useManualBazi && (
-            <div className="form-group rounded-xl border border-ink-300/20 bg-ink-100/30 p-4 dark:border-ink-500/20 dark:bg-ink-800/30">
-              <div className="mb-2 flex items-center justify-between">
+            <div className="form-group rounded-xl border border-ink-300/20 bg-ink-100/30 p-3 dark:border-ink-500/20 dark:bg-ink-800/30">
+              <div className="mb-1.5 flex items-center justify-between">
                 <span className="text-sm font-medium text-ink-600 dark:text-ink-300">
                   四柱预览
                 </span>
@@ -500,7 +542,12 @@ export default function Dashboard() {
                   正在推导……
                 </div>
               ) : previewError ? (
-                <p className="text-sm text-vermilion">{previewError}</p>
+                <div className="flex items-start gap-2 text-sm text-vermilion">
+                  <span className="mt-0.5 inline-block h-4 w-4 shrink-0 rounded-full bg-vermilion/20 text-center text-xs leading-4 text-vermilion">
+                    !
+                  </span>
+                  <span>{formatPreviewError(previewError)}</span>
+                </div>
               ) : previewBazi ? (
                 <div className="flex flex-wrap gap-2">
                   {previewBazi.split(" ").map((pillar, idx) => (
@@ -621,37 +668,6 @@ export default function Dashboard() {
           100% { background-position: 0% 50%; }
         }
 
-        @keyframes fade-up {
-          0% { opacity: 0; transform: translateY(16px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-6px); }
-        }
-
-        @keyframes orbit-slow {
-          0% { transform: rotate(0deg) translateX(8px) rotate(0deg); }
-          100% { transform: rotate(360deg) translateX(8px) rotate(-360deg); }
-        }
-
-        @keyframes orbit-slow-reverse {
-          0% { transform: rotate(0deg) translateX(-8px) rotate(0deg); }
-          100% { transform: rotate(-360deg) translateX(-8px) rotate(360deg); }
-        }
-
-        @keyframes pulse-ring {
-          0% { transform: scale(0.8); opacity: 0.5; }
-          50% { transform: scale(1.1); opacity: 1; }
-          100% { transform: scale(0.8); opacity: 0.5; }
-        }
-
         .mesh-bg {
           background: linear-gradient(
             -45deg,
@@ -664,102 +680,23 @@ export default function Dashboard() {
           animation: mesh 12s ease infinite;
         }
 
-        .animate-fade-up {
-          animation: fade-up 0.5s ease-out forwards;
+        @keyframes form-enter {
+          0% { opacity: 0.3; transform: translateY(10px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
 
         .form-group {
-          opacity: 0;
-          animation: fade-up 0.5s ease-out forwards;
+          opacity: 0.3;
+          animation: form-enter 0.45s ease-out forwards;
         }
 
-        .form-group:nth-child(1) { animation-delay: 50ms; }
-        .form-group:nth-child(2) { animation-delay: 100ms; }
-        .form-group:nth-child(3) { animation-delay: 150ms; }
-        .form-group:nth-child(4) { animation-delay: 200ms; }
-        .form-group:nth-child(5) { animation-delay: 250ms; }
-        .form-group:nth-child(6) { animation-delay: 300ms; }
-        .form-group:nth-child(7) { animation-delay: 350ms; }
-
-        .input-glow {
-          transition: all 0.25s ease;
-        }
-
-        .input-glow:focus,
-        .input-glow:focus-within {
-          box-shadow: 0 0 0 3px rgba(201, 54, 29, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
-          transform: translateY(-1px);
-        }
-
-        .btn-shimmer {
-          position: relative;
-          overflow: hidden;
-          transition: all 0.25s ease;
-        }
-
-        .btn-shimmer::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(
-            90deg,
-            transparent,
-            rgba(255, 255, 255, 0.25),
-            transparent
-          );
-          background-size: 200% 100%;
-          animation: shimmer 2.5s infinite;
-        }
-
-        .btn-shimmer:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(201, 54, 29, 0.3);
-        }
-
-        .btn-shimmer:active {
-          transform: translateY(0);
-        }
-
-        .calendar-toggle {
-          position: relative;
-        }
-
-        .calendar-toggle::before {
-          content: "";
-          position: absolute;
-          top: 4px;
-          left: 4px;
-          width: calc(50% - 4px);
-          height: calc(100% - 8px);
-          background: white;
-          border-radius: 0.5rem;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-          transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        .dark .calendar-toggle::before {
-          background: rgb(55, 65, 81);
-        }
-
-        .calendar-toggle[data-active="lunar"]::before {
-          transform: translateX(100%);
-        }
-
-        .floating-icon {
-          animation: float 3s ease-in-out infinite;
-        }
-
-        .animate-orbit-slow {
-          animation: orbit-slow 12s linear infinite;
-        }
-
-        .animate-orbit-slow-reverse {
-          animation: orbit-slow-reverse 15s linear infinite;
-        }
-
-        .animate-pulse-ring {
-          animation: pulse-ring 2s ease-in-out infinite;
-        }
+        .form-group:nth-child(1) { animation-delay: 40ms; }
+        .form-group:nth-child(2) { animation-delay: 80ms; }
+        .form-group:nth-child(3) { animation-delay: 120ms; }
+        .form-group:nth-child(4) { animation-delay: 160ms; }
+        .form-group:nth-child(5) { animation-delay: 200ms; }
+        .form-group:nth-child(6) { animation-delay: 240ms; }
+        .form-group:nth-child(7) { animation-delay: 280ms; }
       `}</style>
     </div>
   );

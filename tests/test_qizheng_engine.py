@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tools.qizheng.engine import QiZhengAnalyzer, analyze_yearly
+from tools.qizheng.star_tables import MIAO_WANG_YANG
 
 
 @pytest.fixture
@@ -152,7 +153,34 @@ def test_analyze_yearly_mock_fallback():
     assert result.get("_rule_based") is True
     assert result["confidence"] == "low"
     for y in result["yearly_analysis"]:
-        assert all(k in y for k in ("year", "pillar", "overview", "career", "wealth", "marriage", "health", "caution"))
+        assert all(
+            k in y
+            for k in (
+                "year",
+                "pillar",
+                "overview",
+                "career",
+                "wealth",
+                "marriage",
+                "health",
+                "caution",
+                "active_palace",
+                "palace_lord",
+                "palace_lord_relation",
+                "stars_in_palace",
+                "strongest_star",
+                "star_impact",
+                "taishui_impact",
+                "four_remainder_note",
+                "pattern_note",
+            )
+        )
+        assert isinstance(y["stars_in_palace"], list)
+        assert isinstance(y["strongest_star"], dict)
+        assert "name" in y["strongest_star"]
+        assert "strength" in y["strongest_star"]
+        assert y["palace_lord_relation"]
+        assert y["taishui_impact"]
 
 
 def test_analyze_yearly_invalid_chart():
@@ -184,3 +212,32 @@ def test_analyze_yearly_lifetime_mode():
     assert result.get("dayun_summary")
     assert result.get("yearly_analysis")
     assert result.get("_rule_based") is True
+
+
+def test_analyze_yearly_dignity_table_switch():
+    default = run_sync(
+        analyze_yearly(
+            "甲子 丙寅 戊辰 庚午",
+            gender="male",
+            birth_year=1984,
+            mode="10y",
+            api_key="",
+        )
+    )
+    yang = run_sync(
+        analyze_yearly(
+            "甲子 丙寅 戊辰 庚午",
+            gender="male",
+            birth_year=1984,
+            mode="10y",
+            api_key="",
+            dignity_table=MIAO_WANG_YANG,
+        )
+    )
+    assert len(default["yearly_analysis"]) == len(yang["yearly_analysis"])
+    diffs = sum(
+        1
+        for d, y in zip(default["yearly_analysis"], yang["yearly_analysis"])
+        if d["star_impact"] != y["star_impact"]
+    )
+    assert diffs > 0

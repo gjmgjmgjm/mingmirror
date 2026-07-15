@@ -1,0 +1,3 @@
+# Optional dependencies for Qi Zheng Si Yu (七政四余) astronomical calculations.
+# Install with: pip install -r requirements-qizheng.txt
+pyswisseph>=2.10.0

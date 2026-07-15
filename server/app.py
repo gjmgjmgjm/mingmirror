@@ -16,7 +16,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiofiles
 from fastapi import FastAPI, HTTPException, Request
@@ -31,6 +31,7 @@ from control import QueueManager, RateLimiter, RetryHandler
 from core import DouyinAPIClient, DownloaderFactory, URLParser
 from server.jobs import JobManager, JobStatus
 from storage import FileManager
+from tools.qizheng.star_tables import resolve_dignity_table
 from utils.logger import setup_logger
 from utils.validators import is_short_url, normalize_short_url
 
@@ -160,8 +161,14 @@ class BaziFeedbackRequest(BaseModel):
 
 
 class QizhengAnalyzeRequest(BaseModel):
-    bazi: str
+    bazi: Optional[str] = None
     question: str = ""
+    birth_datetime: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    timezone_offset: Optional[float] = None
+    precession_mode: str = "tropical"
+    dignity_table: str = "default"
 
 
 class QizhengAnalyzeResponse(BaseModel):
@@ -170,16 +177,77 @@ class QizhengAnalyzeResponse(BaseModel):
 
 
 class QizhengYearlyRequest(BaseModel):
-    bazi: str
+    bazi: Optional[str] = None
     gender: str = ""
     birth_year: int = 0
     mode: str = "10y"
+    birth_datetime: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    timezone_offset: Optional[float] = None
+    precession_mode: str = "tropical"
+    dignity_table: str = "default"
 
 
 class QizhengYearlyResponse(BaseModel):
     bazi: str
     mode: str
     result: Dict[str, Any]
+
+
+def _resolve_qizheng_input(
+    bazi: Optional[str],
+    birth_datetime: Optional[str],
+    latitude: Optional[float],
+    longitude: Optional[float],
+    timezone_offset: Optional[float],
+    precession_mode: str,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Resolve the chart input for qizheng endpoints.
+
+    Returns a tuple of (chart_info dict for the analyzer, bazi string).
+    If neither bazi nor datetime+location are provided, returns (None, "").
+    """
+    from datetime import datetime as _dt
+
+    from tools.qizheng.calendar import astro_structural_profile
+
+    # Prefer birth_datetime + location when available.
+    if birth_datetime and latitude is not None and longitude is not None:
+        raw = birth_datetime.strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            dt = _dt.fromisoformat(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid datetime: {exc}") from exc
+        profile = astro_structural_profile(
+            birth_datetime=dt,
+            latitude=latitude,
+            longitude=longitude,
+            timezone_offset_hours=timezone_offset,
+            precession_mode=precession_mode,
+        )
+        if profile is None:
+            raise HTTPException(status_code=500, detail="Failed to compute qizheng profile")
+        return (
+            {
+                "birth_datetime": dt.isoformat(),
+                "latitude": latitude,
+                "longitude": longitude,
+                "timezone_offset": timezone_offset,
+                "precession_mode": precession_mode,
+                "chart": profile.get("chart", ""),
+                "bazi": profile.get("chart", ""),
+            },
+            profile.get("chart", ""),
+        )
+
+    if bazi:
+        chart = bazi.strip()
+        return ({"bazi": chart, "chart": chart, "precession_mode": precession_mode}, chart)
+
+    return None, ""
 
 
 class DestinyAnalyzeRequest(BaseModel):
@@ -627,31 +695,84 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
     @app.post("/api/v1/qizheng/analyze", response_model=QizhengAnalyzeResponse)
     async def analyze_qizheng(req: QizhengAnalyzeRequest) -> QizhengAnalyzeResponse:
-        """Analyze a four-pillar chart with Qi Zheng Si Yu."""
+        """Analyze a Qi Zheng Si Yu chart.
+
+        Accepts either a four-pillar ``bazi`` string or a real birth datetime
+        plus geographic coordinates.  When datetime+location are supplied, the
+        astronomical profile is computed from Swiss Ephemeris.
+        """
         from tools.qizheng.engine import QiZhengAnalyzer
 
+        chart_info, bazi = _resolve_qizheng_input(
+            bazi=req.bazi,
+            birth_datetime=req.birth_datetime,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            timezone_offset=req.timezone_offset,
+            precession_mode=req.precession_mode,
+        )
+        if chart_info is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Must provide either bazi or birth_datetime + latitude + longitude",
+            )
+
         ai_cfg = config.get("bazi_ai") or {}
+        try:
+            dignity_table = resolve_dignity_table(req.dignity_table)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         analyzer = QiZhengAnalyzer(
             api_key=ai_cfg.get("api_key") or None,
             base_url=ai_cfg.get("base_url") or None,
             model=ai_cfg.get("model") or None,
             rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
             cases_path=Path("./tools/qizheng/cases.jsonl"),
+            dignity_table=dignity_table,
         )
-        result = await analyzer.analyze({"bazi": req.bazi.strip()}, question=req.question)
-        return QizhengAnalyzeResponse(bazi=req.bazi, result=result)
+        result = await analyzer.analyze(chart_info, question=req.question)
+        return QizhengAnalyzeResponse(bazi=bazi, result=result)
 
     @app.post("/api/v1/qizheng/yearly", response_model=QizhengYearlyResponse)
     async def qizheng_yearly(req: QizhengYearlyRequest) -> QizhengYearlyResponse:
         """Generate a detailed yearly luck analysis with Qi Zheng Si Yu."""
+        from datetime import datetime as _dt
+
         from tools.qizheng.engine import analyze_yearly
+
+        chart_info, bazi = _resolve_qizheng_input(
+            bazi=req.bazi,
+            birth_datetime=req.birth_datetime,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            timezone_offset=req.timezone_offset,
+            precession_mode=req.precession_mode,
+        )
+        if chart_info is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Must provide either bazi or birth_datetime + latitude + longitude",
+            )
 
         ai_cfg = config.get("bazi_ai") or {}
         birth_year = req.birth_year or None
         if birth_year == 0:
             birth_year = None
+        # If a datetime was supplied but no explicit birth_year, derive it.
+        if birth_year is None and req.birth_datetime:
+            try:
+                raw = req.birth_datetime.strip()
+                if raw.endswith("Z"):
+                    raw = raw[:-1] + "+00:00"
+                birth_year = _dt.fromisoformat(raw).year
+            except ValueError:
+                pass
+        try:
+            dignity_table = resolve_dignity_table(req.dignity_table)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = await analyze_yearly(
-            req.bazi.strip(),
+            bazi,
             gender=req.gender,
             birth_year=birth_year,
             mode=req.mode,
@@ -659,8 +780,9 @@ def build_app(config: ConfigLoader) -> FastAPI:
             base_url=ai_cfg.get("base_url") or None,
             model=ai_cfg.get("model") or None,
             rule_primer_path=Path("./tools/qizheng/rule_primer.md"),
+            dignity_table=dignity_table,
         )
-        return QizhengYearlyResponse(bazi=req.bazi, mode=req.mode, result=result)
+        return QizhengYearlyResponse(bazi=bazi, mode=req.mode, result=result)
 
     @app.get("/api/v1/bazi/cases")
     async def list_bazi_cases() -> Dict[str, List[Dict[str, Any]]]:

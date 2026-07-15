@@ -48,8 +48,8 @@ The server module is optional — `fastapi`, `uvicorn`, and `pydantic` are liste
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/qizheng/analyze` | Qi Zheng natal chart analysis |
-| POST | `/api/v1/qizheng/yearly` | Qi Zheng yearly analysis |
+| POST | `/api/v1/qizheng/analyze` | Qi Zheng natal chart analysis; accepts `bazi` or `birth_datetime + latitude + longitude`, optional `precession_mode` |
+| POST | `/api/v1/qizheng/yearly` | Qi Zheng yearly analysis; accepts `bazi` or `birth_datetime + latitude + longitude` |
 
 ### Destiny (多命理融合) Endpoints
 

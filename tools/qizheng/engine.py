@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiofiles
 
 from tools.qizheng import calendar as qz_calendar
+from tools.qizheng import star_tables
 from tools.qizheng.prompts import (
     build_system_prompt,
     build_user_prompt,
@@ -107,7 +108,12 @@ async def _retrieve_similar_cases(
     return [c for _, c in scored[:top_k]]
 
 
-def _build_mock_result(chart: str, question: str, similar_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_mock_result(
+    chart: str,
+    question: str,
+    similar_cases: List[Dict[str, Any]],
+    profile: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     refs = [c.get("chart") for c in similar_cases[:2] if c.get("chart")]
     # Take day master from the third pillar's first character.
     pillars = chart.split()
@@ -130,7 +136,7 @@ def _build_mock_result(chart: str, question: str, similar_cases: List[Dict[str, 
     else:
         domain_analysis = dict(domain_texts)
 
-    return {
+    result: Dict[str, Any] = {
         "basic_info": {
             "chart": chart,
             "day_master": day_master,
@@ -148,6 +154,11 @@ def _build_mock_result(chart: str, question: str, similar_cases: List[Dict[str, 
         "caveats": ["未调用真实模型", "请配置 DEEPSEEK_API_KEY"],
         "_mock": True,
     }
+    if profile and profile.get("astro"):
+        result["astro_profile"] = profile["astro"]
+        result["aspects"] = profile.get("aspects", [])
+        result["patterns"] = profile.get("patterns", [])
+    return result
 
 
 def _domain_keywords(domain: str) -> List[str]:
@@ -158,6 +169,64 @@ def _domain_keywords(domain: str) -> List[str]:
         "health": ["健康", "病", "身体", "手术", "肾", "肝胆", "脾胃"],
     }
     return mapping.get(domain, [])
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    """Parse a datetime value from chart_info."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _resolve_profile(
+    chart_info: Dict[str, Any],
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Resolve the chart string and structural profile from chart_info.
+
+    Priority:
+        1. birth_datetime + latitude + longitude → real astronomical profile.
+        2. chart / bazi string → traditional four-pillar profile.
+    """
+    birth_dt = _parse_datetime(chart_info.get("birth_datetime"))
+    lat = chart_info.get("latitude")
+    lon = chart_info.get("longitude")
+    tz_offset = chart_info.get("timezone_offset")
+    precession_mode = chart_info.get("precession_mode", "tropical")
+
+    if birth_dt is not None and lat is not None and lon is not None:
+        profile = qz_calendar.astro_structural_profile(
+            birth_datetime=birth_dt,
+            latitude=float(lat),
+            longitude=float(lon),
+            timezone_offset_hours=tz_offset,
+            precession_mode=str(precession_mode),
+            dignity_table=dignity_table,
+        )
+        if profile:
+            chart = profile.get("chart", "")
+            normalized = _normalize_chart(chart)
+            if normalized:
+                return normalized, profile
+            # Computed chart failed validation; keep it but note it is unvalidated.
+            return chart, profile
+
+    chart = str(chart_info.get("chart") or chart_info.get("bazi") or "").strip()
+    normalized = _normalize_chart(chart)
+    if normalized is None:
+        return None, None
+    profile = qz_calendar.structural_profile(normalized)
+    return normalized, profile
 
 
 def _parse_json(content: str, chart: str) -> Dict[str, Any]:
@@ -204,6 +273,13 @@ def _merge_structural_profile(result: Dict[str, Any], profile: Optional[Dict[str
         if key not in basic or not basic[key]:
             basic[key] = profile.get(key)
 
+    astro = profile.get("astro")
+    if astro:
+        basic["ascendant"] = round(astro["ascendant"], 2)
+        basic["ascendant_zodiac"] = astro.get("ascendant_zodiac")
+        basic["ascendant_mansion"] = astro.get("ascendant_mansion")
+        basic["midheaven"] = round(astro["midheaven"], 2)
+
 
 def _ensure_domain_analysis(result: Dict[str, Any]) -> Dict[str, Any]:
     """Make sure the result contains the canonical domain keys."""
@@ -229,6 +305,7 @@ class QiZhengAnalyzer:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         top_k: int = 3,
+        dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
     ):
         self.rule_primer_path = rule_primer_path
         self.cases_path = cases_path
@@ -238,6 +315,7 @@ class QiZhengAnalyzer:
         self.base_url = base_url
         self.model = model
         self.top_k = max(0, min(top_k, 10))
+        self.dignity_table = dignity_table
 
     async def analyze(
         self,
@@ -247,34 +325,38 @@ class QiZhengAnalyzer:
         """Analyze a Qi Zheng Si Yu chart.
 
         Args:
-            chart_info: dict with at least a "bazi" / "chart" key containing
-                the four pillars, e.g. "甲子 丙寅 戊辰 庚午".
+            chart_info: dict containing either:
+                - "birth_datetime" + "latitude" + "longitude" for real
+                  astronomical calculation (preferred main entry).
+                - "chart" / "bazi" with the four pillars as fallback,
+                  e.g. "甲子 丙寅 戊辰 庚午".
             question: optional user question.
 
         Returns:
             Structured analysis result matching the bazi engine schema.
         """
-        chart = str(chart_info.get("chart") or chart_info.get("bazi") or "").strip()
-        normalized = _normalize_chart(chart)
-        if normalized is None:
+        chart, profile = _resolve_profile(chart_info, dignity_table=self.dignity_table)
+        if chart is None:
+            raw_chart = str(
+                chart_info.get("chart") or chart_info.get("bazi") or ""
+            ).strip()
             return {
-                "basic_info": {"chart": chart},
-                "error": "无效的命盘格式，需要四柱六十甲子（如：甲子 丙寅 戊辰 庚午）",
+                "basic_info": {"chart": raw_chart},
+                "error": "无效的命盘格式，需要四柱六十甲子（如：甲子 丙寅 戊辰 庚午）"
+                "或提供 birth_datetime + latitude + longitude",
                 "reasoning": "",
                 "domain_analysis": {},
                 "summary": [],
                 "confidence": "low",
-                "caveats": ["输入命盘无法解析为四柱"],
+                "caveats": ["输入命盘无法解析为四柱，且未提供有效的出生时间地点"],
             }
 
-        chart = normalized
         similar_cases = await _retrieve_similar_cases(
             chart, question, self.cases_path, self.top_k
         )
         system_prompt = await build_system_prompt(self.rule_primer_path)
         from tools.qizheng.prompts import _load_few_shot_examples
 
-        profile = qz_calendar.structural_profile(chart)
         few_shot_examples = _load_few_shot_examples(self.examples_path)
         user_prompt = build_user_prompt(
             chart, question, similar_cases,
@@ -288,7 +370,9 @@ class QiZhengAnalyzer:
             or os.environ.get("DEEPSEEK_API_KEY")
         )
         if not key:
-            return _ensure_domain_analysis(_build_mock_result(chart, question, similar_cases))
+            return _ensure_domain_analysis(
+                _build_mock_result(chart, question, similar_cases, profile)
+            )
 
         base = (
             self.base_url
@@ -382,11 +466,17 @@ async def analyze_yearly(
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     rule_primer_path: Optional[Path] = None,
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
 ) -> Dict[str, Any]:
     """Analyze yearly luck for a Qi Zheng Si Yu chart.
 
     *mode* can be ``"10y"`` for the next 10 years, or ``"lifetime"`` for a
     full reading until age 80.
+
+    *dignity_table* selects the planetary dignity tradition used when
+    evaluating the palace lord star in the rule-based fallback.  Defaults to
+    the built-in table; pass ``star_tables.MIAO_WANG_YANG`` for the Yang
+    Guozheng school.
     """
     normalized = _normalize_chart(chart)
     if normalized is None:
@@ -458,7 +548,14 @@ async def analyze_yearly(
         or os.environ.get("DEEPSEEK_API_KEY")
     )
     if not key:
-        return _rule_based_yearly(chart, dayun_active, liunian, birth_year)
+        return _rule_based_yearly(
+            chart,
+            dayun_active,
+            liunian,
+            birth_year,
+            profile=profile,
+            dignity_table=dignity_table,
+        )
 
     base = (
         base_url
@@ -518,6 +615,8 @@ async def analyze_yearly(
                             liunian,
                             birth_year,
                             Exception(f"AI 输出无法解析，已切换兜底。片段：{raw_snippet}"),
+                            profile=profile,
+                            dignity_table=dignity_table,
                         )
                     parsed.setdefault("dayun_summary", [])
                     parsed.setdefault("yearly_analysis", [])
@@ -528,7 +627,12 @@ async def analyze_yearly(
 
                     if mode == "lifetime":
                         rule_fallback = _rule_based_yearly(
-                            chart, dayun_active, liunian, birth_year
+                            chart,
+                            dayun_active,
+                            liunian,
+                            birth_year,
+                            profile=profile,
+                            dignity_table=dignity_table,
                         )
                         parsed["yearly_analysis"] = rule_fallback.get("yearly_analysis", [])
                         if not parsed.get("overall_guidance"):
@@ -542,7 +646,15 @@ async def analyze_yearly(
                                 existing.add(c)
                         return parsed
 
-                    return _validate_yearly_output(parsed, chart, dayun_active, liunian, birth_year)
+                    return _validate_yearly_output(
+                        parsed,
+                        chart,
+                        dayun_active,
+                        liunian,
+                        birth_year,
+                        profile=profile,
+                        dignity_table=dignity_table,
+                    )
         except Exception as exc:
             last_error = exc
             logger.warning("七政流年分析请求失败 (attempt %d/2): %s", attempt, exc)
@@ -550,8 +662,13 @@ async def analyze_yearly(
                 await asyncio.sleep(2.0)
 
     return _rule_based_yearly(
-        chart, dayun_active, liunian, birth_year,
-        Exception(f"AI 服务暂时不可用：{last_error}")
+        chart,
+        dayun_active,
+        liunian,
+        birth_year,
+        Exception(f"AI 服务暂时不可用：{last_error}"),
+        profile=profile,
+        dignity_table=dignity_table,
     )
 
 
@@ -585,6 +702,8 @@ def _validate_yearly_output(
     dayun: List[Dict[str, Any]],
     liunian: List[Dict[str, Any]],
     birth_year: int,
+    profile: Optional[Dict[str, Any]] = None,
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
 ) -> Dict[str, Any]:
     """Sanity-check yearly output; fall back to rule-based if too generic."""
     yearly = result.get("yearly_analysis", [])
@@ -592,8 +711,13 @@ def _validate_yearly_output(
     if not yearly or len(yearly) < len(liunian) * 0.8 or not all(all(k in y for k in required) for y in yearly):
         logger.warning("七政流年分析字段缺失或年份不足，使用兜底分析")
         return _rule_based_yearly(
-            chart, dayun, liunian, birth_year,
-            Exception("AI 返回字段缺失或年份不足，已切换兜底")
+            chart,
+            dayun,
+            liunian,
+            birth_year,
+            Exception("AI 返回字段缺失或年份不足，已切换兜底"),
+            profile=profile,
+            dignity_table=dignity_table,
         )
     return result
 
@@ -604,11 +728,95 @@ def _rule_based_yearly(
     liunian: List[Dict[str, Any]],
     birth_year: int,
     last_error: Optional[Exception] = None,
+    profile: Optional[Dict[str, Any]] = None,
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
 ) -> Dict[str, Any]:
-    """Return a structured fallback combining dayun and liunian."""
-    profile = qz_calendar.structural_profile(chart) or {}
+    """Return a structured fallback combining dayun and liunian.
+
+    If *profile* contains an ``astro`` section, the original natal bodies are
+    used to evaluate the strength of the active palace.  Otherwise the palace
+    lord star is evaluated from the branch alone.
+    """
+    if profile is None:
+        profile = qz_calendar.structural_profile(chart) or {}
     day_master_stem = profile.get("day_master", "")
     dm_element = _STEM_ELEMENT.get(day_master_stem, "")
+
+    bodies = (profile.get("astro") or {}).get("bodies", {})
+
+    def _palace_star_info(
+        palace: str, branch: str
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], str, str]:
+        """Return (strongest_star, stars_in_palace, star_impact, lord_relation)."""
+        palace_lord = star_tables.PALACE_LORD.get(branch, "")
+        stars: List[Dict[str, Any]] = []
+
+        # Natal bodies that fall in this palace (when astro data is available).
+        for name, info in bodies.items():
+            if info.get("house_palace") == palace:
+                stars.append(
+                    {
+                        "name": name,
+                        "strength": info.get("strength", "平"),
+                        "dignity": info.get("dignity", "平"),
+                        "rulership": info.get("rulership", "不入垣"),
+                    }
+                )
+
+        # Always include the palace lord, evaluating it from the branch if no
+        # astro data is present.
+        if palace_lord and not any(s["name"] == palace_lord for s in stars):
+            dignity = star_tables.body_dignity(palace_lord, branch, dignity_table)
+            rulership = star_tables.body_rulership(palace_lord, branch)
+            stars.append(
+                {
+                    "name": palace_lord,
+                    "strength": star_tables.body_strength(
+                        palace_lord, branch, "", dignity_table=dignity_table
+                    ),
+                    "dignity": dignity,
+                    "rulership": rulership,
+                }
+            )
+
+        if not stars:
+            strongest = {"name": palace_lord or "", "strength": "平"}
+        else:
+            stars.sort(key=lambda s: _strength_rank(s["strength"]), reverse=True)
+            strongest = {"name": stars[0]["name"], "strength": stars[0]["strength"]}
+
+        # 宫主星与宫位地支的五行生克关系。
+        lord_relation = ""
+        lord_element = star_tables.BODY_ELEMENT.get(palace_lord)
+        branch_element = _BRANCH_ELEMENT.get(branch)
+        if lord_element and branch_element:
+            if branch_element == lord_element:
+                lord_relation = "同气得助"
+            elif _GENERATING.get(branch_element) == lord_element:
+                lord_relation = "地支生扶"
+            elif _RESTRAINING.get(branch_element) == lord_element:
+                lord_relation = "地支受克"
+            elif _GENERATING.get(lord_element) == branch_element:
+                lord_relation = "泄耗地支"
+            elif _RESTRAINING.get(lord_element) == branch_element:
+                lord_relation = "克制地支"
+            else:
+                lord_relation = "生克平和"
+
+        focus_a = _PALACE_DOMAIN.get(palace, ("运势", "综合"))[0]
+        if strongest["strength"] in ("庙", "旺", "乐", "入垣升殿"):
+            impact = f"{palace}宫主{palace_lord}得势，星曜有力，该年{focus_a}顺遂"
+        elif strongest["strength"] in ("入垣", "升殿", "得地"):
+            impact = f"{palace}宫主{palace_lord}得地，{focus_a}小有助力"
+        elif strongest["strength"] == "陷":
+            impact = f"{palace}宫主{palace_lord}落陷，该年{focus_a}多阻滞，宜守"
+        else:
+            impact = f"{palace}宫主{palace_lord}状态平和，按常规节奏即可"
+
+        if lord_relation:
+            impact += f"（宫主{palace_lord}与地支{branch}{lord_relation}）"
+
+        return strongest, stars, impact, lord_relation
 
     def _element_relation(target_element: str) -> str:
         if not dm_element or not target_element:
@@ -641,6 +849,92 @@ def _rule_based_yearly(
             if pair == h or pair[::-1] == h:
                 return f"合({el})"
         return None
+
+    def _adjust_star_level_by_relation(level: str, relation: str) -> str:
+        """Adjust the star level based on the palace lord's branch relation."""
+        if relation in ("同气得助", "地支生扶"):
+            if level == "bad":
+                return "neutral"
+            if level == "neutral":
+                return "favourable"
+            if level == "favourable":
+                return "good"
+        if relation == "地支受克":
+            if level == "good":
+                return "favourable"
+            if level in ("favourable", "neutral"):
+                return "bad"
+        return level
+
+    def _taishui_impact(active_branch: str, liunian_branch: str) -> str:
+        """Describe the impact of the yearly branch (tai sui) on the active palace."""
+        interaction = _branch_interaction(active_branch, liunian_branch)
+        if interaction:
+            if interaction.startswith("冲"):
+                return f"太岁{liunian_branch}冲{active_branch}宫，变动明显"
+            if interaction.startswith("合"):
+                return f"太岁{liunian_branch}合{active_branch}宫，机缘人缘增"
+        active_el = _BRANCH_ELEMENT.get(active_branch)
+        ly_el = _BRANCH_ELEMENT.get(liunian_branch)
+        if active_el and ly_el:
+            if _GENERATING.get(ly_el) == active_el:
+                return f"太岁{liunian_branch}生{active_branch}宫，助力"
+            if _RESTRAINING.get(ly_el) == active_el:
+                return f"太岁{liunian_branch}克{active_branch}宫，压力"
+            if _GENERATING.get(active_el) == ly_el:
+                return f"太岁{liunian_branch}泄{active_branch}宫，耗力"
+        return f"太岁{liunian_branch}与{active_branch}宫气场平和"
+
+    def _is_day_birth(hour_branch: str) -> Optional[bool]:
+        if hour_branch in ("卯", "辰", "巳", "午", "未", "申"):
+            return True
+        if hour_branch in ("子", "丑", "寅", "酉", "戌", "亥"):
+            return False
+        return None
+
+    def _four_remainder_overlay(palace: str, hour_branch: str) -> str:
+        """Return a short note for four-remainder influences in the active palace."""
+        notes: List[str] = []
+        day = _is_day_birth(hour_branch)
+        for name, info in bodies.items():
+            if info.get("house_palace") != palace:
+                continue
+            if name == "紫气":
+                notes.append("紫气临宫，清高福寿")
+            elif name == "罗睺":
+                if day is True:
+                    notes.append("昼生罗睺临宫，防破耗争斗")
+                else:
+                    notes.append("罗睺临宫，仍有波动")
+            elif name == "计都":
+                if day is False:
+                    notes.append("夜生计都临宫，防暗耗小人")
+                else:
+                    notes.append("计都临宫，留意阻滞")
+            elif name == "月孛":
+                notes.append("月孛临宫，感情暗财多变动")
+        return "；".join(notes)
+
+    def _pattern_overlay(palace: str) -> str:
+        """Return a note if the active palace is affected by classical patterns."""
+        pattern_names = {p.get("name", "") for p in profile.get("patterns", [])}
+        if "罗计拦截" in pattern_names or "罗计夹命" in pattern_names:
+            # Check whether the active palace sits between Rahu and Ketu.
+            rah_palace = (bodies.get("罗睺") or {}).get("house_palace")
+            ket_palace = (bodies.get("计都") or {}).get("house_palace")
+            if rah_palace and ket_palace and palace in (rah_palace, ket_palace):
+                return "罗计夹/截此宫，主波折而贵"
+        if "土计掩月" in pattern_names and palace in (
+            (bodies.get("土星") or {}).get("house_palace"),
+            (bodies.get("计都") or {}).get("house_palace"),
+            (bodies.get("太阴") or {}).get("house_palace"),
+        ):
+            return "土计掩月波及此宫，注意健康情绪"
+        if "紫气临命" in pattern_names and palace == "命宫":
+            return "紫气临命，福寿清高"
+        if "紫气朝垣" in pattern_names and palace == "官禄":
+            return "紫气朝垣，官福清贵"
+        return ""
 
     def _dayun_theme(palace: str, branch: str) -> Tuple[str, str]:
         domain = _PALACE_DOMAIN.get(palace, ("运势", "综合"))
@@ -684,23 +978,59 @@ def _rule_based_yearly(
             overview_parts.append(f"天干{ly_stem_rel}、地支{ly_branch_rel}")
         overview = "，".join(overview_parts)
 
+        active_palace = active["palace"]
+        active_branch = active["pillar"]
+        palace_lord = star_tables.PALACE_LORD.get(active_branch, "")
+        (
+            strongest_star,
+            stars_in_palace,
+            star_impact,
+            lord_relation,
+        ) = _palace_star_info(active_palace, active_branch)
+        star_level = _star_level_from_strength(strongest_star["strength"])
+        if strongest_star.get("name") == palace_lord:
+            star_level = _adjust_star_level_by_relation(star_level, lord_relation)
+
         domains = _yearly_domain_text(
-            active["palace"], ly_stem_rel, ly_branch_rel, interaction, age
+            active_palace,
+            ly_stem_rel,
+            ly_branch_rel,
+            interaction,
+            age,
+            star_level=star_level,
         )
 
+        taishui = _taishui_impact(active_branch, ly_branch)
+        four_note = _four_remainder_overlay(active_palace, profile.get("hour_branch", ""))
+        pattern_note = _pattern_overlay(active_palace)
+        overlay_notes = " ".join(n for n in (four_note, pattern_note) if n)
+        if overlay_notes:
+            star_impact += f" [{overlay_notes}]"
+
         if interaction and interaction.startswith("冲"):
-            caution = f"{active['palace']}宫逢冲，变动明显"
+            caution = f"{active_palace}宫逢冲，变动明显；{taishui}"
         elif ly_stem_rel == "受克" or ly_branch_rel == "受克":
-            caution = "流年克耗日主，宜稳守"
+            caution = f"流年克耗日主，宜稳守；{taishui}"
         elif ly_stem_rel == "生助" or ly_branch_rel == "生助":
-            caution = "得助之年，可适度进取"
+            caution = f"得助之年，可适度进取；{taishui}"
         else:
-            caution = "平运，按部就班"
+            caution = f"平运，按部就班；{taishui}"
+        if overlay_notes:
+            caution += f" [{overlay_notes}]"
 
         yearly_analysis.append(
             {
                 "year": y["year"],
                 "pillar": y["pillar"],
+                "active_palace": active_palace,
+                "palace_lord": palace_lord,
+                "palace_lord_relation": lord_relation,
+                "stars_in_palace": stars_in_palace,
+                "strongest_star": strongest_star,
+                "star_impact": star_impact,
+                "taishui_impact": taishui,
+                "four_remainder_note": four_note,
+                "pattern_note": pattern_note,
                 "overview": overview,
                 "career": domains["career"],
                 "wealth": domains["wealth"],
@@ -724,12 +1054,40 @@ def _rule_based_yearly(
     }
 
 
+_STRENGTH_RANK = {
+    "庙": 8,
+    "旺": 7,
+    "乐": 6,
+    "入垣升殿": 5,
+    "入垣": 4,
+    "升殿": 3,
+    "得地": 2,
+    "平": 1,
+    "陷": 0,
+}
+
+
+def _strength_rank(strength: str) -> int:
+    return _STRENGTH_RANK.get(strength, 1)
+
+
+def _star_level_from_strength(strength: str) -> str:
+    if strength in ("庙", "旺", "乐", "入垣升殿"):
+        return "good"
+    if strength in ("入垣", "升殿", "得地"):
+        return "favourable"
+    if strength == "陷":
+        return "bad"
+    return "neutral"
+
+
 def _yearly_domain_text(
     palace: str,
     stem_rel: str,
     branch_rel: str,
     interaction: Optional[str],
     age: int,
+    star_level: str = "neutral",
 ) -> Dict[str, str]:
     """Generate domain texts for the rule-based yearly fallback."""
     good = stem_rel in ("生助", "比劫") or branch_rel in ("生助", "比劫")
@@ -744,6 +1102,18 @@ def _yearly_domain_text(
         level = "good"
     else:
         level = "flat"
+
+    # Adjust the base level according to the strength of the palace stars.
+    if star_level == "good":
+        if level == "bad":
+            level = "flat"
+        elif level == "flat":
+            level = "good"
+    elif star_level == "bad":
+        if level == "good":
+            level = "flat"
+        elif level == "flat":
+            level = "bad"
 
     palace_focus = {
         "命宫": ("自身", "心态"),
@@ -761,30 +1131,37 @@ def _yearly_domain_text(
     }
     focus_a, focus_b = palace_focus.get(palace, ("综合", "运势"))
 
+    star_note = {
+        "good": "，星曜得地助益",
+        "favourable": "，星曜小有助力",
+        "bad": "，星曜落陷牵制",
+        "neutral": "",
+    }[star_level]
+
     templates = {
         "chong": {
-            "career": f"{focus_a}宫位逢冲，职场易有变动，重大决策宜缓",
-            "wealth": "财务波动，预留备用金，忌高风险投资",
-            "marriage": "感情易有口角或距离变化，多沟通",
-            "health": "注意突发急症与出行安全",
+            "career": f"{focus_a}宫位逢冲，职场易有变动，重大决策宜缓{star_note}",
+            "wealth": f"财务波动，预留备用金，忌高风险投资{star_note}",
+            "marriage": f"感情易有口角或距离变化，多沟通{star_note}",
+            "health": f"注意突发急症与出行安全{star_note}",
         },
         "bad": {
-            "career": f"流年克耗，{focus_a}方面压力增加，以稳为主",
-            "wealth": "支出可能增加，控制预算",
-            "marriage": "是非稍多，少争执",
-            "health": "关注对应脏腑，规律作息",
+            "career": f"流年克耗，{focus_a}方面压力增加，以稳为主{star_note}",
+            "wealth": f"支出可能增加，控制预算{star_note}",
+            "marriage": f"是非稍多，少争执{star_note}",
+            "health": f"关注对应脏腑，规律作息{star_note}",
         },
         "good": {
-            "career": f"流年得助，{focus_a}方面可主动争取",
-            "wealth": "小有进益，量入为出",
-            "marriage": "人际和谐，感情宜积极推进",
-            "health": "精力充沛，保持运动习惯",
+            "career": f"流年得助，{focus_a}方面可主动争取{star_note}",
+            "wealth": f"小有进益，量入为出{star_note}",
+            "marriage": f"人际和谐，感情宜积极推进{star_note}",
+            "health": f"精力充沛，保持运动习惯{star_note}",
         },
         "flat": {
-            "career": f"{focus_a}方面按节奏推进",
-            "wealth": "量入为出",
-            "marriage": "顺其自然",
-            "health": "规律作息",
+            "career": f"{focus_a}方面按节奏推进{star_note}",
+            "wealth": f"量入为出{star_note}",
+            "marriage": f"顺其自然{star_note}",
+            "health": f"规律作息{star_note}",
         },
     }
     return templates[level]
