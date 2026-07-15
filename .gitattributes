@@ -1,0 +1,5 @@
+# Pin line endings on data files that get rewritten wholesale on Windows.
+# Without this, regenerating *.jsonl case files flips CRLF<->LF and shows every
+# line as changed (e.g. cases_baziqa.jsonl: 688 ins / 688 del, zero content diff).
+*.jsonl text eol=lf
+*.json  text eol=lf
