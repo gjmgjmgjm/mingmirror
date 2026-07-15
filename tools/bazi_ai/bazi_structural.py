@@ -952,6 +952,42 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
     return result
 
 
+_HEALTH_ORGANS = {
+    "木": ["肝", "胆", "筋", "神经", "目"],
+    "火": ["心", "血", "小肠", "眼", "舌"],
+    "土": ["脾", "胃", "口", "肉"],
+    "金": ["肺", "呼吸", "大肠", "皮肤", "鼻"],
+    "水": ["肾", "膀胱", "骨", "耳", "泌尿"],
+}
+
+
+def health_profile(bazi: str) -> Optional[Dict]:
+    """Deterministic 五行→脏腑弱项推断 (结构层健康锚点, 零 LLM).
+
+    五行偏枯则对应脏腑弱:最弱五行(本气不足)+ 被最旺五行所克(被压制).
+    用于注入 engine 健康断(像用神/格局),给 LLM 确定性锚点,而非让其自推.
+    """
+    prof = structural_profile(bazi)
+    if prof is None:
+        return None
+    stems, branches = prof["stems"], prof["branches"]
+    w = dict.fromkeys(_ELEMENT.values(), 0.0)
+    for s in stems:
+        w[_ELEMENT[s]] += 0.5
+    for b in branches:
+        w[_ELEMENT[b]] += 1.0
+    ordered = sorted(w.items(), key=lambda kv: kv[1])
+    weakest, strongest = ordered[0][0], ordered[-1][0]
+    weak_els = {weakest, _RESTRAINING[strongest]}  # 最弱 + 被最旺克
+    organs = sorted({o for el in weak_els for o in _HEALTH_ORGANS.get(el, [])})
+    return {
+        "weakest_element": weakest,
+        "strongest_element": strongest,
+        "weak_organs": organs,
+        "element_weights": w,
+    }
+
+
 def yearly_relations(
     bazi: str,
     dayun_pillar: str,
