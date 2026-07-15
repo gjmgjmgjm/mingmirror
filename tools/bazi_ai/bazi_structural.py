@@ -894,6 +894,24 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         else:
             strength = "弱"    # 有根无透干非得令→弱; 虚浮→弱; 根全坏→弱
 
+        # 星被重度克泄→降级为弱(命理: 财被比劫夺 / 食伤被枭夺 / 官被食伤克).
+        # 修模式B: 六亲星透干有根 → engine 判强, 但星被耗泄、master 判弱.
+        if strength == "强":
+            _w = dict.fromkeys(_ELEMENT.values(), 0.0)
+            for _s in stems:
+                _w[_ELEMENT[_s]] += 0.5
+            for _b in branches:
+                _w[_ELEMENT[_b]] += 1.0
+            _yin = _find_key(_GENERATING, star_el)      # 生星=印(帮)
+            _xie = _GENERATING[star_el]                  # 星生=食伤(泄)
+            _keme = _find_key(_RESTRAINING, star_el)     # 克星=官杀
+            _ike = _RESTRAINING[star_el]                 # 星克=财(耗)
+            _help = _w[star_el] + _w.get(_yin, 0.0)
+            _drain = _w.get(_xie, 0.0) + _w.get(_keme, 0.0) + _w.get(_ike, 0.0)
+            if _drain - _help >= 1.5:
+                strength = "弱"
+                support_notes.append(f"但{star_el}星被克泄过重({_xie}/{_keme}/{_ike}党众),实为弱")
+
         return {
             "star": shishen,
             "exists": True,
