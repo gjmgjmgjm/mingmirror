@@ -54,7 +54,7 @@ def _extract(text: str, needle: str) -> str:
 def main() -> None:
     print("实时跑确定性尺子（零 API）...\n", file=sys.stderr)
     chart = _run("validate_chart.py")
-    yong = _run("validate_yongshen.py")
+    yong = _run("validate_yongshen_full.py")  # 大 n: celebrity50+contest8+mingli 去重
     liu = _run("validate_liuqin_det.py")
 
     paipan = _extract(chart, "真实排盘准确率")

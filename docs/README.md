@@ -28,7 +28,7 @@
 | 维度 | 准确率 | gold 性质 |
 |------|--------|-----------|
 | 排盘 | 100% (32/32) | ✅ 真实(对齐 iztro 预制命盘) |
-| 用神 | 94% (30/32) | ✅ 真实(对齐穷通宝鉴调候) |
+| 用神 | 90% (83/92, 大n) | ✅ 真实(对齐穷通宝鉴调候) |
 | 格局 | 100% | 自洽(月令定格注入) |
 | 忌神 | 92% | 自洽(规则引擎注入) |
 | 旺衰 | 75% | 自洽(规则引擎) |
@@ -55,7 +55,8 @@ python benchmarks/baziqa/validate_mingli.py  --limit 12     # 事件/年份
 | 尺子 | 测什么 | 是否需 API |
 |------|--------|:----------:|
 | `validate_chart.py` | 排盘 vs iztro(自动检测立春 gold 错) | 否 |
-| `validate_yongshen.py` | 用神 vs 穷通宝鉴调候 | 否 |
+| `validate_yongshen.py` | 用神 vs 穷通宝鉴调候(MingLi 32) | 否 |
+| `validate_yongshen_full.py` | 用神 vs 穷通宝鉴(大n聚合 92 命主) | 否 |
 | `validate_consensus.py` | 格局 / 用神 / 忌神 / 旺衰(规则注入自洽) | 否(det)/ 是(e2e) |
 | `validate_liuqin_det.py` | 六亲确定性(绕过 LLM) | 否 |
 | `validate_real.py` | 六亲强弱 e2e(deepseek prose + field) | 是 |
