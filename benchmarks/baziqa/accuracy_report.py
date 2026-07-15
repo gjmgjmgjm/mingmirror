@@ -26,9 +26,9 @@ BENCH = ROOT / "benchmarks" / "baziqa"
 # Self-consistency / API-gated dimensions (not run live here).
 # (value, gold_kind, refresh_cmd)
 _CACHED_DIMS = [
-    ("格局", "100%", "自洽(月令定格注入)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
-    ("忌神", "92%", "自洽(规则引擎注入)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
-    ("旺衰", "75%", "自洽(规则引擎)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
+    ("格局", "100%", "确定性注入(非accuracy)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
+    ("忌神", "92%", "确定性注入(非accuracy)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
+    ("旺衰", "75%", "LLM一致性(非accuracy)", "python benchmarks/baziqa/validate_consensus.py --limit 12"),
     ("具体事件/年份", "0%(开放式)/40%(MCQ)", "真实(名人验证事件)", "python benchmarks/baziqa/validate_mingli.py --limit 12"),
 ]
 
