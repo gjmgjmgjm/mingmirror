@@ -74,7 +74,7 @@ dy-downloader/
 
 > **「结构层 90%」= 有独立 gold 的维度**:排盘 100%、用神 90%(大 n)达成;**六亲 77%(det,n=39)未达 90%,是结构层唯一 accuracy 短板**(加"星被耗泄→弱"判定后 74→77,zero regression)。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**非 accuracy,不计入**。六亲剩余 9 错例约半为 gold 噪声(memory 评估边际递减);事件层开放式 ≈0% 是物理天花板,产品输出**趋势**而非断言。
 
-**已落地能力**:四柱校验、领域感知 RAG + embedding、规则引擎兜底(结婚/子女/父母应期)、用神引擎(扶抑+调候+通关)、`quxiang` 取象专字段、top-2 shortlist→LLM、多轮 ensemble;紫微斗数 / 七政四余(Swiss Ephemeris,多岁差模式)/ 多命理融合(debate / reflection / tool / retriever);命运剧本(RPG 角色卡 + 大运分章);事件反推校准。
+**已落地能力**:四柱校验、领域感知 RAG + embedding、规则引擎兜底(结婚/子女/父母应期)、用神引擎(扶抑+调候+通关)、`quxiang` 取象专字段、top-2 shortlist→LLM、多轮 ensemble、**多模型辩论 `ensemble_debate`(chat+reasoner 并发 + critic 结构裁决 + 分歧标记)**;紫微斗数 / 七政四余(Swiss Ephemeris,多岁差模式)/ 多命理融合(debate / reflection / tool / retriever);命运剧本(RPG 角色卡 + 大运分章);事件反推校准。
 
 **下一步杠杆(按性价比)**:① ✅ 用神已扩到大 n=92(90.2%);② 旺衰无独立 gold(杨炎=六亲断象、MingLi/celebrity=事件),要谈 accuracy 需先标注命主旺衰 gold(数据工作,非代码攻坚);③ ✅ 六亲 det 已加"星被耗泄→弱"判定(74→77%,父亲 75→83,zero regression;threshold 1.5,1.0 会 over-fire);剩余 9 错例约半 gold 噪声,边际递减;④ 现阶段不建议做 SFT/LoRA(需 GPU,真人路线未必需要)。
 

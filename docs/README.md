@@ -72,7 +72,7 @@ python benchmarks/baziqa/validate_mingli.py  --limit 12     # 事件/年份
 ## 项目亮点速览
 
 - **下载器**:无水印下载、并发限速重试、SQLite 去重增量、`post`/`like`/`mix`/`music` 浏览器兜底、FastAPI server(job 提交 / 取消 / SSE / 配置覆盖)、CI 全覆盖(Python 3.9–3.12 矩阵)。
-- **命镜**:四柱校验、领域感知 RAG + embedding、规则引擎兜底、用神引擎(扶抑 + 调候 + 通关)、取象专字段、多轮 ensemble;八字 / 紫微 / 七政四余 / 多命理融合 REST API;React Web UI(Dashboard / Chart / Yearly / Qizheng / Ziwei / Council / Sandbox / Script / Cases / Calendar)。
+- **命镜**:四柱校验、领域感知 RAG + embedding、规则引擎兜底、用神引擎(扶抑 + 调候 + 通关)、取象专字段、多轮 ensemble、**多模型辩论 `ensemble_debate`**(chat+reasoner + critic 结构裁决);八字 / 紫微 / 七政四余 / 多命理融合 REST API;React Web UI(Dashboard / Chart / Yearly / Qizheng / Ziwei / Council / Sandbox / Script / Cases / Calendar)。
 
 ## 相关入口
 
