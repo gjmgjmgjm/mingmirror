@@ -33,9 +33,9 @@ _CACHED_DIMS = [
 ]
 
 
-def _run(script: str) -> str:
+def _run(script: str, *args: str) -> str:
     proc = subprocess.run(
-        [sys.executable, str(BENCH / script)], cwd=str(ROOT),
+        [sys.executable, str(BENCH / script), *args], cwd=str(ROOT),
         capture_output=True, text=True, timeout=180,
     )
     return proc.stdout + proc.stderr
@@ -55,7 +55,7 @@ def main() -> None:
     print("实时跑确定性尺子（零 API）...\n", file=sys.stderr)
     chart = _run("validate_chart.py")
     yong = _run("validate_yongshen_full.py")  # 大 n: celebrity50+contest8+mingli 去重
-    liu = _run("validate_liuqin_det.py")
+    liu = _run("validate_liuqin_det.py", "--limit", "200")  # 全量(n=39);默认30是小样本偏差
 
     paipan = _extract(chart, "真实排盘准确率")
     yongshen = _extract(yong, "与调候gold有交集")
