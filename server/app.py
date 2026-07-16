@@ -139,6 +139,29 @@ class BaziFromDatetimeResponse(BaseModel):
     calendar_type: str
 
 
+class BaziReportRequest(BaseModel):
+    bazi: str
+    gender: str = "male"
+    birth_date: str = ""
+    birth_time: str = "00:00"
+    calendar_type: str = "solar"
+    top_k: int = 3
+
+
+class BaziReportResponse(BaseModel):
+    bazi: str
+    report: Dict[str, Any]
+
+
+class BaziAuspiciousRequest(BaseModel):
+    bazi: str
+    gender: str = "male"
+    event_type: str = "marriage"
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    top_n: int = 10
+
+
 class BaziExtractRequest(BaseModel):
     user_dir: str
     duration: int = 60
@@ -586,6 +609,54 @@ def build_app(config: ConfigLoader) -> FastAPI:
             model=ai_cfg.get("model") or None,
         )
         return BaziAnalyzeResponse(bazi=req.bazi, result=result)
+
+    @app.post("/api/v1/bazi/report", response_model=BaziReportResponse)
+    async def bazi_report(req: BaziReportRequest) -> BaziReportResponse:
+        """生成结构化可解释报告(确定性结构层 + LLM 增强),一次返回 sections。"""
+        from tools.bazi_ai.engine import analyze_bazi
+        from tools.bazi_ai.report_template import build_report
+
+        ai_cfg = config.get("bazi_ai") or {}
+        cases_path = Path(ai_cfg.get("cases", "./bazi_knowledge/cases.jsonl"))
+        knowledge_path = Path(ai_cfg.get("knowledge_base", "./bazi_knowledge/rule_primer.md"))
+        embedding_cache = ai_cfg.get("embedding_cache")
+        embedding_cache_path = Path(embedding_cache) if embedding_cache else None
+        knowledge_embedding_cache = ai_cfg.get("knowledge_embedding_cache")
+        knowledge_embedding_cache_path = Path(knowledge_embedding_cache) if knowledge_embedding_cache else None
+
+        def _report_paths(key: str) -> List[Path]:
+            values = ai_cfg.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            return [Path(v) for v in values if v]
+
+        result = await analyze_bazi(
+            req.bazi.strip(),
+            question="",
+            gender=req.gender,
+            birth_date=req.birth_date,
+            birth_time=req.birth_time,
+            calendar_type=req.calendar_type,
+            cases_path=cases_path,
+            knowledge_base_path=knowledge_path,
+            extra_cases_paths=_report_paths("extra_cases_paths"),
+            extra_knowledge_base_paths=_report_paths("extra_knowledge_base_paths"),
+            embedding_cache_path=embedding_cache_path,
+            knowledge_embedding_cache_path=knowledge_embedding_cache_path,
+            top_k=min(max(req.top_k, 1), 10),
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+        )
+        birth_info = {
+            "birth_date": req.birth_date,
+            "birth_time": req.birth_time,
+            "calendar_type": req.calendar_type,
+        }
+        report = build_report(
+            req.bazi.strip(), gender=req.gender, result=result, birth_info=birth_info
+        )
+        return BaziReportResponse(bazi=req.bazi, report=report)
 
     def _birth_year(birth_date: str) -> Optional[int]:
         try:
@@ -1053,6 +1124,37 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 ) from exc
 
         return daily_fortune(req.bazi.strip(), target_date)
+
+    @app.post("/api/v1/bazi/auspicious")
+    async def bazi_auspicious(req: BaziAuspiciousRequest) -> Dict[str, Any]:
+        """目标导向个性化吉日推荐(命主用神忌神 + 冲合 + 目标权重)。"""
+        try:
+            from tools.bazi_ai.auspicious import auspicious_days
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"auspicious subsystem not available: {exc}",
+            ) from exc
+
+        from datetime import date as _date
+
+        date_from = None
+        date_to = None
+        try:
+            if req.date_from:
+                date_from = _date.fromisoformat(req.date_from)
+            if req.date_to:
+                date_to = _date.fromisoformat(req.date_to)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid date format: {exc}",
+            ) from exc
+
+        return auspicious_days(
+            req.bazi.strip(), req.gender, req.event_type,
+            date_from, date_to, req.top_n,
+        )
 
     @app.post("/api/v1/destiny/script", response_model=DestinyScriptResponse)
     async def destiny_script(req: DestinyScriptRequest) -> DestinyScriptResponse:

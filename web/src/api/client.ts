@@ -59,6 +59,13 @@ export interface Milestone {
   description: string;
 }
 
+export interface BaziQuxiang {
+  day_master?: string;
+  key_shishen?: string;
+  career?: string;
+  health?: string;
+}
+
 export interface BaziResult {
   basic_info: BaziBasicInfo;
   reasoning: string;
@@ -73,6 +80,11 @@ export interface BaziResult {
   summary: string[];
   confidence: "high" | "medium" | "low";
   caveats: string[];
+  // 结构层专字段(engine 注入,确定性)
+  quxiang?: BaziQuxiang;
+  liuqin_strength?: Record<string, string>; // father/mother/spouse/son/daughter/brother/sister → "强"|"弱"
+  liuqin_analysis?: string;
+  dayun_summary?: string;
   error?: string;
 }
 
@@ -89,6 +101,93 @@ export function analyzeBazi(
   return fetchJson<BaziAnalyzeResponse>("/bazi/analyze", {
     method: "POST",
     body: JSON.stringify({ bazi, question, top_k: topK }),
+  });
+}
+
+export interface ReportMeta {
+  bazi: string;
+  gender: string;
+  gender_label: string;
+}
+
+export interface ReportSection {
+  id: string;
+  title: string;
+  trust: "certain" | "ai";
+  data: Record<string, any>;
+}
+
+export interface ReportData {
+  meta: ReportMeta;
+  sections: ReportSection[];
+}
+
+export interface BaziReportResponse {
+  bazi: string;
+  report: ReportData;
+}
+
+export function fetchBaziReport(
+  bazi: string,
+  gender: string,
+  birthDate: string,
+  birthTime: string,
+  calendarType: "solar" | "lunar" = "solar",
+  topK = 3
+): Promise<BaziReportResponse> {
+  return fetchJson<BaziReportResponse>("/bazi/report", {
+    method: "POST",
+    body: JSON.stringify({
+      bazi,
+      gender,
+      birth_date: birthDate,
+      birth_time: birthTime,
+      calendar_type: calendarType,
+      top_k: topK,
+    }),
+  });
+}
+
+export interface AuspiciousDay {
+  date: string;
+  day_pillar: string;
+  score: number;
+  weather: string;
+  shishen: string;
+  reasoning: string;
+  dos: string[];
+  avoids: string[];
+  recommended: boolean;
+}
+
+export interface AuspiciousResponse {
+  bazi: string;
+  event_type: string;
+  event_label: string;
+  useful_gods: string[];
+  taboo_gods: string[];
+  days: AuspiciousDay[];
+  error?: string;
+}
+
+export function fetchBaziAuspicious(
+  bazi: string,
+  gender: string,
+  eventType: string,
+  dateFrom: string,
+  dateTo: string,
+  topN = 12
+): Promise<AuspiciousResponse> {
+  return fetchJson<AuspiciousResponse>("/bazi/auspicious", {
+    method: "POST",
+    body: JSON.stringify({
+      bazi,
+      gender,
+      event_type: eventType,
+      date_from: dateFrom,
+      date_to: dateTo,
+      top_n: topN,
+    }),
   });
 }
 

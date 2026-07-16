@@ -1,15 +1,21 @@
 import { Link, useLocation } from "react-router-dom";
 import ChartBasic from "./ChartBasic";
 import YearlyChart from "./YearlyChart";
+import ReadingReport from "./ReadingReport";
 
 const tabs = [
   { path: "/chart", label: "基础分析" },
+  { path: "/chart/report", label: "解读报告" },
   { path: "/chart/yearly", label: "流年精排" },
 ];
 
+const SUB_PATHS = ["/chart/yearly", "/chart/report"];
+
 export default function Chart() {
   const location = useLocation();
-  const active = location.pathname === "/chart/yearly" ? "/chart/yearly" : "/chart";
+  const active = SUB_PATHS.includes(location.pathname)
+    ? location.pathname
+    : "/chart";
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -32,7 +38,13 @@ export default function Chart() {
         })}
       </div>
 
-      {active === "/chart/yearly" ? <YearlyChart /> : <ChartBasic />}
+      {active === "/chart/yearly" ? (
+        <YearlyChart />
+      ) : active === "/chart/report" ? (
+        <ReadingReport />
+      ) : (
+        <ChartBasic />
+      )}
     </div>
   );
 }

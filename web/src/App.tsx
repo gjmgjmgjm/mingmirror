@@ -20,6 +20,7 @@ function AnimatedRoutes() {
       <Routes location={location}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/chart" element={<Chart />} />
+        <Route path="/chart/report" element={<Chart />} />
         <Route path="/chart/yearly" element={<Chart />} />
         <Route path="/qizheng" element={<Qizheng />} />
         <Route path="/qizheng/yearly" element={<QizhengYearly />} />
