@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Sparkles,
   ArrowRight,
@@ -12,11 +12,17 @@ import {
 import { SealStamp, ErrorPanel } from "../components/ui";
 import { useChart, type ChartInfo, type LocationInfo } from "../contexts/ChartContext";
 import { parseBazi } from "../lib/bazi";
-import { baziFromDatetime } from "../api/client";
+import {
+  baziFromDatetime,
+  fetchDemoCharts,
+  type DemoChart,
+} from "../api/client";
 import PillarsChart from "../components/PillarsChart";
 import FiveElementBars from "../components/FiveElementBars";
 import DailyWeather from "../components/DailyWeather";
+import LifeTwinPanel from "../components/LifeTwinPanel";
 import WheelPicker from "../components/WheelPicker";
+import { track } from "../lib/analytics";
 
 const DEFAULT_LOCATION: LocationInfo = {
   name: "北京",
@@ -99,7 +105,7 @@ const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, i) =>
 );
 
 export default function Dashboard() {
-  const { chart, setChart } = useChart();
+  const { chart, setChart, persistChart } = useChart();
 
   const now = getNowParts();
   const defaultYear = String(new Date().getFullYear() - 25);
@@ -225,8 +231,13 @@ export default function Dashboard() {
         timezone,
       },
     };
+    // Local first for instant UI, then persist UUID for product APIs.
     setChart(next);
     setAnimateKey((k) => k + 1);
+    setShowForm(false);
+    void persistChart(next).then((saved) => {
+      track("chart_created", { has_id: Boolean(saved.id) }, saved.id || saved.bazi);
+    });
   };
 
   const handleReplay = () => {
@@ -254,23 +265,186 @@ export default function Dashboard() {
     );
   };
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editRequested = searchParams.get("edit") === "1";
+  const [showForm, setShowForm] = useState(!chart || editRequested);
+  const [demos, setDemos] = useState<DemoChart[]>([]);
+  const [demoLoadingId, setDemoLoadingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    track("page_home");
+  }, []);
+
+  // 顶栏「修改命盘」点击跳回 /?edit=1：展开表单，触发后清掉 param（确保可重复触发）
+  useEffect(() => {
+    if (editRequested) {
+      setShowForm(true);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("edit");
+          return next;
+        },
+        { replace: true }
+      );
+    }
+  }, [editRequested, setSearchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDemoCharts()
+      .then((res) => {
+        if (!cancelled) setDemos(res.items || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDemos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadDemo = async (demo: DemoChart) => {
+    setDemoLoadingId(demo.id);
+    setDeriveError(null);
+    try {
+      const next: ChartInfo = {
+        bazi: demo.bazi,
+        gender: demo.gender || "male",
+        birthDate: demo.birth_date || "",
+        birthTime: demo.birth_time || "",
+        calendarType: (demo.calendar_type as "solar" | "lunar") || "solar",
+        label: demo.label,
+        location: demo.location
+          ? {
+              name: demo.location.name,
+              longitude: demo.location.longitude,
+              latitude: demo.location.latitude,
+              timezone: demo.location.timezone,
+            }
+          : DEFAULT_LOCATION,
+      };
+      setChart(next);
+      setAnimateKey((k) => k + 1);
+      setShowForm(false);
+      // sync form wheels for re-edit
+      if (demo.birth_date) {
+        const [y, m, d] = demo.birth_date.split("-");
+        if (y) setBirthYear(y);
+        if (m) setBirthMonth(m);
+        if (d) setBirthDay(d);
+      }
+      if (demo.birth_time) {
+        const [h, mi] = demo.birth_time.split(":");
+        if (h) setBirthHour(h);
+        if (mi) setBirthMinute(mi);
+        setSavedTime({ hour: h || "12", minute: mi || "00" });
+      }
+      setGender(demo.gender || "");
+      const saved = await persistChart(next);
+      track(
+        "demo_chart_loaded",
+        { demo_id: demo.id },
+        saved.id || saved.bazi
+      );
+    } catch (err) {
+      setDeriveError(err instanceof Error ? err.message : "加载演示命盘失败");
+    } finally {
+      setDemoLoadingId(null);
+    }
+  };
+
   return (
     <div className="relative mx-auto max-w-5xl space-y-6">
-      <section className="relative overflow-hidden rounded-2xl border border-vermilion/10 bg-gradient-to-br from-white/90 via-ink-100/90 to-white/90 px-5 py-5 text-center shadow-lg backdrop-blur-sm dark:border-vermilion/20 dark:from-ink-800/90 dark:via-ink-900/90 dark:to-ink-800/90 md:px-8">
-        <div className="pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full border border-vermilion/20 opacity-50 animate-orbit-slow" aria-hidden="true" />
-        <div className="pointer-events-none absolute -left-3 bottom-0 h-14 w-14 rounded-full border border-gold/20 opacity-50 animate-orbit-slow-reverse" aria-hidden="true" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(circle,rgba(201,162,39,0.08),transparent_60%)]" aria-hidden="true" />
-        <div className="relative mb-2 flex items-center justify-center gap-3">
-          <SealStamp size="sm" variant="vermilion">命镜</SealStamp>
-          <h1 className="font-display text-2xl text-ink-800 dark:text-ink-100 md:text-3xl">
-            生成你的命运数字孪生
-          </h1>
-        </div>
-        <p className="relative mx-auto max-w-2xl text-xs text-ink-600 dark:text-ink-300 md:text-sm">
-          输入出生时间、地点与性别，命镜将自动推导出八字，并为你构建可交互、可推演、可对比的个人命运模型。
-        </p>
-      </section>
+      {!chart && (
+        <section className="relative overflow-hidden rounded-2xl border border-vermilion/10 bg-gradient-to-br from-white/90 via-ink-100/90 to-white/90 px-5 py-5 text-center shadow-lg backdrop-blur-sm dark:border-vermilion/20 dark:from-ink-800/90 dark:via-ink-900/90 dark:to-ink-800/90 md:px-8">
+          <div className="pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full border border-vermilion/20 opacity-50 animate-orbit-slow" aria-hidden="true" />
+          <div className="pointer-events-none absolute -left-3 bottom-0 h-14 w-14 rounded-full border border-gold/20 opacity-50 animate-orbit-slow-reverse" aria-hidden="true" />
+          <div className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(circle,rgba(201,162,39,0.08),transparent_60%)]" aria-hidden="true" />
+          <div className="relative mb-2 flex items-center justify-center gap-3">
+            <SealStamp size="sm" variant="vermilion">命镜</SealStamp>
+            <h1 className="font-display text-2xl text-ink-800 dark:text-ink-100 md:text-3xl">
+              生成你的命运数字孪生
+            </h1>
+          </div>
+          <p className="relative mx-auto max-w-2xl text-xs text-ink-600 dark:text-ink-300 md:text-sm">
+            输入出生时间、地点与性别，命镜将自动推导出八字，并为你构建可交互、可推演、可对比的个人命运模型。
+          </p>
+        </section>
+      )}
 
+      {demos.length > 0 && (
+        <section className="panel p-4 md:p-5">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="font-display text-lg text-ink-800 dark:text-ink-100">
+                一键演示
+              </h2>
+              <p className="mt-0.5 text-xs text-ink-500">
+                固定样例命盘 · 结构层可离线排盘 · 适合体验流年 / 紫微 / 七政 / 导出命书
+              </p>
+            </div>
+            <Link
+              to="/pricing"
+              className="text-xs text-vermilion hover:underline"
+            >
+              套餐演示码 demo-pro
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {demos.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                disabled={demoLoadingId === d.id}
+                onClick={() => void loadDemo(d)}
+                className="rounded-xl border border-ink-300/25 bg-ink-100/40 p-3 text-left transition hover:border-vermilion/40 hover:bg-vermilion/5 disabled:opacity-60 dark:border-ink-600/30 dark:bg-ink-800/40"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-sm font-medium text-ink-800 dark:text-ink-100">
+                    {d.label}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-ink-400">
+                    {demoLoadingId === d.id ? "加载中…" : "加载"}
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-xs text-vermilion">{d.bazi}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-ink-500">
+                  {d.blurb}
+                </p>
+                {(d.tags || []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(d.tags || []).slice(0, 5).map((t) => (
+                      <span
+                        key={t}
+                        className="rounded bg-ink-200/60 px-1.5 py-0.5 text-[10px] text-ink-600 dark:bg-ink-700/60 dark:text-ink-300"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {parsed && chart && <LifeTwinPanel />}
+
+      {chart && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="text-xs text-ink-500 underline decoration-ink-300 hover:text-vermilion"
+          >
+            {showForm ? "收起排盘表单" : "重新排盘 / 修改出生信息"}
+          </button>
+        </div>
+      )}
+
+      {(showForm || !chart) && (
       <section className="panel p-4 md:p-5">
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="form-group flex items-center gap-4">
@@ -603,6 +777,7 @@ export default function Dashboard() {
           </div>
         </form>
       </section>
+      )}
 
       {parsed && chart && (
         <>
@@ -643,7 +818,7 @@ export default function Dashboard() {
 
           <section>
             <h2 className="mb-4 text-xl font-semibold text-ink-700 dark:text-ink-200">
-              今日运势天气
+              今日运势天气（详情）
             </h2>
             <DailyWeather bazi={chart.bazi} animate={animateKey > 0} />
           </section>

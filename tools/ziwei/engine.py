@@ -126,25 +126,30 @@ class ZiWeiAnalyzer:
         return asyncio.run(self.analyze(chart_info, question))
 
     def _validate_input(self, chart_info: Dict[str, Any]) -> Optional[str]:
-        """Return an error message if the input is invalid, otherwise None."""
+        """Return an error message if the input is invalid, otherwise None.
+
+        Product path may supply only ``bazi`` + ``gender`` for structure-layer
+        charting; full birth_datetime+location still preferred for LLM path.
+        """
         if not isinstance(chart_info, dict):
             return "chart_info 必须是字典"
-        if "birth_datetime" not in chart_info:
-            return "缺少 birth_datetime"
-        if "gender" not in chart_info:
-            return "缺少 gender"
-        if chart_info.get("gender") not in ("male", "female"):
+        has_bazi = bool((chart_info.get("bazi") or chart_info.get("chart") or "").strip())
+        has_birth = bool(chart_info.get("birth_datetime"))
+        if not has_bazi and not has_birth:
+            return "缺少 bazi 或 birth_datetime"
+        gender = chart_info.get("gender")
+        if gender is not None and gender not in ("male", "female", "男", "女"):
             return "gender 必须是 male 或 female"
-        location = chart_info.get("location")
-        if not isinstance(location, dict):
-            return "location 必须是字典"
-        for field in ("longitude", "latitude", "timezone"):
-            if field not in location:
-                return f"location 缺少 {field}"
-        try:
-            datetime.fromisoformat(str(chart_info["birth_datetime"]).replace("Z", "+00:00"))
-        except ValueError:
-            return "birth_datetime 格式不正确，应为 ISO 8601"
+        if has_birth:
+            try:
+                datetime.fromisoformat(
+                    str(chart_info["birth_datetime"]).replace("Z", "+00:00")
+                )
+            except ValueError:
+                return "birth_datetime 格式不正确，应为 ISO 8601"
+            location = chart_info.get("location")
+            if location is not None and not isinstance(location, dict):
+                return "location 必须是字典"
         return None
 
     def _error_result(
@@ -166,75 +171,92 @@ class ZiWeiAnalyzer:
         question: str,
         similar_cases: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Return a deterministic placeholder analysis when no API key is available."""
-        gender = chart_info.get("gender", "unknown")
+        """Structure-layer chart + domain hints when no API key is available."""
+        from tools.ziwei.chart import chart_from_birth, to_basic_info
+
+        gender = chart_info.get("gender", "male")
+        if gender in ("男",):
+            gender = "male"
+        if gender in ("女",):
+            gender = "female"
+        bazi = (chart_info.get("bazi") or chart_info.get("chart") or "").strip()
+        birth_date = ""
+        bdt = chart_info.get("birth_datetime") or ""
+        if isinstance(bdt, str) and len(bdt) >= 10:
+            birth_date = bdt[:10]
+        birth_date = chart_info.get("birth_date") or birth_date
+
+        struct = chart_from_birth(bazi, gender=str(gender), birth_date=birth_date) if bazi else None
         refs = [c.get("birth_datetime") for c in similar_cases[:2] if c.get("birth_datetime")]
 
-        if str(gender).lower() == "male":
-            ming_gong, zhu_xing = "巳宫", ["紫微", "天府"]
-        else:
-            ming_gong, zhu_xing = "亥宫", ["天同", "天梁"]
-
-        domain_focus = self._detect_question_domains(question)
-        default_score = 60
-        domain_texts = {
-            "career": {
-                "score": 78,
-                "text": "事业宫主星得力，适合管理、行政或技术岗位，中年后易得贵人提携。",
-                "keywords": ["管理", "贵人", "中年后发"],
-            },
-            "wealth": {
-                "score": 65,
-                "text": "财帛宫有禄存，正财运稳，但偏财运一般，宜稳健理财。",
-                "keywords": ["正财", "稳健", "忌投机"],
-            },
-            "marriage": {
-                "score": 70,
-                "text": "夫妻宫主星温和，配偶顾家，宜晚婚更稳。",
-                "keywords": ["晚婚", "温和", "顾家"],
-            },
-            "health": {
-                "score": 55,
-                "text": "疾厄宫见 minor 煞星，需注意肠胃与肝胆，避免熬夜。",
-                "keywords": ["肠胃", "肝胆", "作息"],
-            },
-            "general": {
-                "score": 72,
-                "text": "整体格局中上，主星得力，一生有贵人扶助，需注意情绪管理。",
-                "keywords": ["贵人", "稳重", "情绪管理"],
-            },
-        }
-
-        domain_analysis: Dict[str, Dict[str, Any]] = {}
-        for domain in ("career", "wealth", "marriage", "health", "general"):
-            if domain_focus and domain not in domain_focus:
-                domain_analysis[domain] = {
-                    "score": default_score,
-                    "text": "该领域在 mock 模式下仅作占位，请提供具体问题或配置 API key 后重试。",
-                    "keywords": ["待分析"],
+        if struct:
+            basic = to_basic_info(struct)
+            domain_raw = struct.get("domain_analysis") or {}
+            domain_analysis = {
+                k: {
+                    "score": 70 if k != "health" else 60,
+                    "text": domain_raw.get(k, ""),
+                    "keywords": [],
                 }
-            else:
-                domain_analysis[domain] = domain_texts[domain]
+                for k in ("career", "wealth", "marriage", "health", "general")
+            }
+            cur = struct.get("current_limit") or {}
+            summary = [
+                f"命宫{struct.get('life_palace')} · 身宫{struct.get('body_palace')} · {struct.get('bureau_label')}",
+                f"命宫主星：{'、'.join(struct.get('zhu_xing') or [])}"
+                + (
+                    f"；辅{'、'.join(struct.get('ming_aux') or [])}"
+                    if struct.get("ming_aux")
+                    else ""
+                ),
+                f"年干四化：{'；'.join(struct.get('si_hua') or [])}",
+            ]
+            if cur:
+                summary.append(
+                    f"当前大限{cur.get('label')}走{cur.get('branch')}"
+                    f"（{struct.get('limit_direction') or ''}）"
+                )
+            if refs:
+                summary.append(f"参考相似案例：{', '.join(str(r) for r in refs)}")
+            reasoning = (
+                "结构层已完成安命身宫、五行局、紫微/天府系主星与年干四化（确定性简化算法）。"
+                "未配置 DEEPSEEK_API_KEY，领域断语为宫位主星提示，非完整斗数精批。"
+            )
+            caveats = [
+                "结构层 certain_simplified",
+                struct.get("note") or "",
+                "配置 DEEPSEEK_API_KEY 可叠加 LLM 细批",
+            ]
+        else:
+            basic = {
+                "ming_gong": "未知",
+                "shen_gong": "未知",
+                "zhu_xing": [],
+                "si_hua": [],
+            }
+            domain_analysis = {
+                k: {"score": 50, "text": "八字不足，无法排盘。", "keywords": []}
+                for k in ("career", "wealth", "marriage", "health", "general")
+            }
+            summary = ["无法从输入生成紫微结构盘"]
+            reasoning = "缺少有效四柱八字。"
+            caveats = ["invalid_bazi"]
+            struct = {}
 
         return {
             "system": "ziwei",
-            "basic_info": {
-                "ming_gong": ming_gong,
-                "shen_gong": "待 DeepSeek 分析",
-                "zhu_xing": zhu_xing,
-                "si_hua": ["禄在迁移", "权在事业", "科在财帛", "忌在疾厄"],
-            },
-            "reasoning": "当前未配置 DEEPSEEK_API_KEY，仅返回 mock 占位分析。请设置环境变量后重试以获取真实紫微斗数排盘与推断。",
+            "basic_info": basic,
+            "structural": struct,
+            "reasoning": reasoning,
             "domain_analysis": domain_analysis,
-            "summary": (
-                [f"参考相似案例：{', '.join(refs)}"] if refs else ["未找到相似案例"]
-            ),
-            "confidence": "low",
-            "caveats": ["未调用真实模型", "请配置 DEEPSEEK_API_KEY"],
+            "summary": summary,
+            "confidence": "medium" if struct else "low",
+            "caveats": [c for c in caveats if c],
             "raw": {
                 "input": chart_info,
                 "similar_cases": refs,
                 "_mock": True,
+                "_structural": True,
             },
         }
 

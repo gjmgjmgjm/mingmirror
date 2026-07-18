@@ -152,6 +152,11 @@ def test_analyze_yearly_mock_fallback():
     assert len(result["yearly_analysis"]) == 10
     assert result.get("_rule_based") is True
     assert result["confidence"] == "low"
+    assert result.get("trust") == "certain_simplified"
+    summary = result.get("structural_summary") or {}
+    assert summary.get("life_palace")
+    assert summary.get("day_master")
+    assert summary.get("liunian_count") == 10
     for y in result["yearly_analysis"]:
         assert all(
             k in y

@@ -1,5 +1,172 @@
 export const API_PREFIX = "/api/v1";
 
+// ---------------------------------------------------------------------------
+// Chart identity (product layer)
+// ---------------------------------------------------------------------------
+
+export interface ServerChart {
+  id: string;
+  bazi: string;
+  gender: string;
+  birth_date: string;
+  birth_time: string;
+  calendar_type: string;
+  location?: {
+    name?: string;
+    longitude: number;
+    latitude: number;
+    timezone: string;
+  } | null;
+  label: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CreateChartRequest {
+  bazi: string;
+  gender?: string;
+  birth_date?: string;
+  birth_time?: string;
+  calendar_type?: string;
+  location?: {
+    name?: string;
+    longitude: number;
+    latitude: number;
+    timezone: string;
+  };
+  label?: string;
+  reuse_existing?: boolean;
+}
+
+export function createChart(payload: CreateChartRequest): Promise<ServerChart> {
+  return fetchJson<ServerChart>("/charts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface DemoChart {
+  id: string;
+  label: string;
+  blurb: string;
+  bazi: string;
+  gender: string;
+  birth_date: string;
+  birth_time: string;
+  calendar_type: string;
+  location?: {
+    name?: string;
+    longitude: number;
+    latitude: number;
+    timezone: string;
+  };
+  tags?: string[];
+  highlights?: string[];
+}
+
+export function fetchDemoCharts(): Promise<{
+  count: number;
+  items: DemoChart[];
+  note?: string;
+  pricing_demo_code?: string;
+}> {
+  return fetchJson("/product/demo-charts");
+}
+
+export function fetchDemoChartPackage(
+  demoId: string,
+  opts?: PackageExportOptions
+): Promise<ProductPackage> {
+  return fetchJson(`/product/demo-charts/${encodeURIComponent(demoId)}/package`, {
+    method: "POST",
+    body: JSON.stringify({
+      liunian_start_year: opts?.liunian_start_year,
+      liunian_years: opts?.liunian_years ?? 10,
+    }),
+  });
+}
+
+
+export function listCharts(limit = 50): Promise<ServerChart[]> {
+  return fetchJson<ServerChart[]>("/charts", { params: { limit } });
+}
+
+export function getChart(chartId: string): Promise<ServerChart> {
+  return fetchJson<ServerChart>(`/charts/${encodeURIComponent(chartId)}`);
+}
+
+export interface ProductPackage {
+  meta: {
+    bazi: string;
+    gender: string;
+    chart_id?: string | null;
+    label: string;
+    package_version: string;
+  };
+  report: Record<string, unknown>;
+  auspicious: {
+    event_label?: string;
+    top?: Array<{
+      date: string;
+      day_pillar: string;
+      score: number;
+      reasoning: string;
+    }>;
+  };
+  markdown: string;
+  html: string;
+  filename_stem: string;
+  disclaimer: string;
+}
+
+export interface PackageExportOptions {
+  liunian_start_year?: number;
+  liunian_years?: number;
+}
+
+export function exportChartPackage(
+  chartId: string,
+  opts?: PackageExportOptions
+): Promise<ProductPackage> {
+  return fetchJson<ProductPackage>(
+    `/charts/${encodeURIComponent(chartId)}/export/package`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        liunian_start_year: opts?.liunian_start_year,
+        liunian_years: opts?.liunian_years ?? 10,
+      }),
+    }
+  );
+}
+
+export function exportBaziPackage(
+  payload: CreateChartRequest & PackageExportOptions
+): Promise<ProductPackage> {
+  return fetchJson<ProductPackage>("/bazi/export/package", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function downloadTextFile(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function openHtmlPrint(html: string) {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
@@ -148,25 +315,45 @@ export function fetchBaziReport(
   });
 }
 
+export interface AuspiciousHour {
+  branch: string;
+  pillar: string;
+  label: string;
+  clock: string;
+  start_hour: number;
+  end_hour: number;
+  score: number;
+  reasoning: string;
+  recommended: boolean;
+}
+
 export interface AuspiciousDay {
   date: string;
   day_pillar: string;
   score: number;
   weather: string;
   shishen: string;
+  shensha?: { name: string; category?: string; effect: "吉" | "凶"; info?: string }[];
   reasoning: string;
   dos: string[];
   avoids: string[];
+  hours?: AuspiciousHour[];
+  best_hour?: AuspiciousHour | null;
   recommended: boolean;
 }
 
 export interface AuspiciousResponse {
   bazi: string;
+  gender?: string;
   event_type: string;
   event_label: string;
   useful_gods: string[];
   taboo_gods: string[];
+  date_from?: string;
+  date_to?: string;
   days: AuspiciousDay[];
+  top?: AuspiciousDay[];
+  ics?: string;
   error?: string;
 }
 
@@ -176,7 +363,8 @@ export function fetchBaziAuspicious(
   eventType: string,
   dateFrom: string,
   dateTo: string,
-  topN = 12
+  topN = 12,
+  options?: { includeIcs?: boolean; hourTopK?: number }
 ): Promise<AuspiciousResponse> {
   return fetchJson<AuspiciousResponse>("/bazi/auspicious", {
     method: "POST",
@@ -187,6 +375,8 @@ export function fetchBaziAuspicious(
       date_from: dateFrom,
       date_to: dateTo,
       top_n: topN,
+      hour_top_k: options?.hourTopK ?? 3,
+      include_ics: options?.includeIcs ?? false,
     }),
   });
 }
@@ -237,7 +427,8 @@ export function analyzeYearly(
   birthDate: string,
   birthTime: string,
   calendarType: "solar" | "lunar" = "solar",
-  mode: "10y" | "20y" | "lifetime" = "10y"
+  mode: "10y" | "20y" | "lifetime" = "10y",
+  opts?: { start_year?: number; years?: number }
 ): Promise<BaziYearlyResponse> {
   return fetchJson<BaziYearlyResponse>("/bazi/yearly", {
     method: "POST",
@@ -248,6 +439,8 @@ export function analyzeYearly(
       birth_time: birthTime,
       calendar_type: calendarType,
       mode,
+      start_year: opts?.start_year,
+      years: opts?.years,
     }),
   });
 }
@@ -257,8 +450,12 @@ export interface QizhengBasicInfo {
   day_master?: string;
   life_palace?: string;
   body_palace?: string;
+  body_lord?: string;
+  five_element_pattern?: string;
+  nayin?: string;
   dominant_stars?: string[];
   twelve_palaces?: Record<string, string>;
+  trust?: string;
 }
 
 export interface QizhengDomainAnalysis {
@@ -294,10 +491,72 @@ export function analyzeQizheng(
   });
 }
 
+export interface QizhengYearlyDayun {
+  pillar: string;
+  palace?: string;
+  start_age: number;
+  end_age: number;
+  theme: string;
+  focus: string;
+}
+
+export interface QizhengYearlyStar {
+  name: string;
+  strength?: string;
+  dignity?: string;
+  rulership?: string;
+}
+
+export interface QizhengYearlyItem {
+  year: number;
+  pillar: string;
+  overview: string;
+  career: string;
+  wealth: string;
+  marriage: string;
+  health: string;
+  caution: string;
+  active_palace?: string;
+  palace_lord?: string;
+  palace_lord_relation?: string;
+  stars_in_palace?: QizhengYearlyStar[];
+  strongest_star?: QizhengYearlyStar;
+  star_impact?: string;
+  taishui_impact?: string;
+  four_remainder_note?: string;
+  pattern_note?: string;
+}
+
+export interface QizhengStructuralSummary {
+  chart?: string;
+  day_master?: string;
+  life_palace?: string;
+  body_palace?: string;
+  body_lord?: string;
+  five_element_pattern?: string;
+  hour_branch?: string;
+  patterns?: string[];
+  dayun_count?: number;
+  liunian_count?: number;
+}
+
+export interface QizhengYearlyResult {
+  dayun_summary?: QizhengYearlyDayun[];
+  yearly_analysis?: QizhengYearlyItem[];
+  overall_guidance?: string;
+  confidence?: "high" | "medium" | "low";
+  trust?: string;
+  note?: string;
+  structural_summary?: QizhengStructuralSummary;
+  caveats?: string[];
+  error?: string;
+  _rule_based?: boolean;
+}
+
 export interface QizhengYearlyResponse {
   bazi: string;
   mode: string;
-  result: Record<string, unknown>;
+  result: QizhengYearlyResult;
 }
 
 export function analyzeQizhengYearly(
@@ -316,6 +575,130 @@ export function analyzeQizhengYearly(
       mode,
       dignity_table: dignityTable,
     }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Zi Wei Dou Shu
+// ---------------------------------------------------------------------------
+
+export interface ZiweiPalace {
+  name: string;
+  branch: string;
+  stars: string[];
+  main_stars?: string[];
+  aux_stars?: string[];
+  sha_stars?: string[];
+  star_traits?: string[];
+}
+
+export interface ZiweiMajorLimit {
+  index: number;
+  branch: string;
+  palace_name: string;
+  start_age: number;
+  end_age: number;
+  label: string;
+  direction: string;
+}
+
+export interface ZiweiBasicInfo {
+  ming_gong?: string;
+  shen_gong?: string;
+  zhu_xing?: string[];
+  ming_aux?: string[];
+  ming_sha?: string[];
+  si_hua?: string[];
+  bureau_label?: string;
+  life_palace?: string;
+  body_palace?: string;
+  palaces?: ZiweiPalace[];
+  major_limits?: ZiweiMajorLimit[];
+  current_limit?: ZiweiMajorLimit | null;
+  limit_direction?: string;
+  trust?: string;
+  note?: string;
+}
+
+export interface ZiweiResult {
+  system?: string;
+  basic_info?: ZiweiBasicInfo;
+  structural?: {
+    palaces?: ZiweiPalace[];
+    bureau_label?: string;
+    life_palace?: string;
+    body_palace?: string;
+  };
+  domain_analysis?: Record<
+    string,
+    string | { text?: string; score?: number; keywords?: string[] }
+  >;
+  reasoning?: string;
+  summary?: string[];
+  confidence?: string;
+  caveats?: string[];
+}
+
+export interface ZiweiAnalyzeResponse {
+  bazi: string;
+  result: ZiweiResult;
+}
+
+export function analyzeZiwei(payload: {
+  bazi: string;
+  gender?: string;
+  question?: string;
+  birth_datetime?: string;
+  birth_date?: string;
+  location?: { longitude: number; latitude: number; timezone: string };
+}): Promise<ZiweiAnalyzeResponse> {
+  return fetchJson<ZiweiAnalyzeResponse>("/ziwei/analyze", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface ZiweiLiunianYear {
+  year: number;
+  pillar: string;
+  age?: number | null;
+  palace_name: string;
+  palace_branch: string;
+  main_stars: string[];
+  aux_stars: string[];
+  sha_stars: string[];
+  si_hua: string[];
+  overview: string;
+  focus: string;
+  career: string;
+  wealth: string;
+  marriage: string;
+  health: string;
+  caution: string;
+  major_limit?: ZiweiMajorLimit | null;
+}
+
+export interface ZiweiYearlyResult {
+  error?: string | null;
+  basic_info?: ZiweiBasicInfo;
+  liunian?: ZiweiLiunianYear[];
+  start_year?: number;
+  end_year?: number;
+  note?: string;
+  trust?: string;
+}
+
+export function analyzeZiweiYearly(payload: {
+  bazi: string;
+  gender?: string;
+  birth_date?: string;
+  start_year?: number;
+  end_year?: number;
+  years?: number;
+}): Promise<{ bazi: string; result: ZiweiYearlyResult }> {
+  return fetchJson<{ bazi: string; result: ZiweiYearlyResult }>("/ziwei/yearly", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -379,6 +762,8 @@ export interface DestinyAnalyzeResponse {
   final_summary: string;
   overall_confidence: "high" | "medium" | "low";
   strategy?: string;
+  system_weights?: Record<string, number>;
+  weights_source?: string;
 }
 
 export interface LocationPayload {
@@ -395,6 +780,8 @@ export interface DestinyAnalyzeRequest {
   gender?: string;
   birth_datetime?: string;
   location?: LocationPayload;
+  use_calibration_weights?: boolean;
+  system_weights?: Record<string, number>;
 }
 
 export function analyzeDestiny(
@@ -566,6 +953,13 @@ export function createEvent(
   });
 }
 
+export function deleteEvent(chartId: string, eventId: string): Promise<{ deleted: boolean }> {
+  return fetchJson<{ deleted: boolean }>(
+    `/charts/${encodeURIComponent(chartId)}/events/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" }
+  );
+}
+
 export interface CalibrationEventDetail {
   event_id: string;
   event_type: string;
@@ -583,6 +977,8 @@ export interface CalibrationResponse {
   adjusted_weights: Record<string, number>;
   suggested_hour_offset?: number;
   events: CalibrationEventDetail[];
+  calibration_id?: string;
+  created_at?: number;
 }
 
 export function calibrateChart(chartId: string): Promise<CalibrationResponse> {
@@ -590,4 +986,90 @@ export function calibrateChart(chartId: string): Promise<CalibrationResponse> {
     `/charts/${encodeURIComponent(chartId)}/calibrate`,
     { method: "POST" }
   );
+}
+
+export function fetchLatestCalibration(
+  chartId: string
+): Promise<CalibrationResponse> {
+  return fetchJson<CalibrationResponse>(
+    `/charts/${encodeURIComponent(chartId)}/calibrate/latest`
+  );
+}
+
+export interface CompatibilityDimension {
+  key: string;
+  label: string;
+  score: number;
+  weight: number;
+}
+
+export interface CompatibilityReading {
+  sections: Array<{ id: string; title: string; text: string }>;
+  advice: string[];
+  markdown?: string;
+}
+
+export interface JointAuspiciousDay {
+  date: string;
+  day_pillar: string;
+  score: number;
+  score_a: number;
+  score_b: number;
+  weather?: string;
+  reasoning: string;
+  recommended: boolean;
+  best_hour?: {
+    label?: string;
+    clock?: string;
+    score?: number;
+  } | null;
+}
+
+export interface CompatibilityResponse {
+  score: number;
+  level: string;
+  dimensions: CompatibilityDimension[];
+  supports: string[];
+  conflicts: string[];
+  summary: string;
+  reading?: CompatibilityReading;
+  note?: string;
+  profiles: {
+    a: Record<string, unknown>;
+    b: Record<string, unknown>;
+  };
+  joint_days?: JointAuspiciousDay[];
+  joint_top?: JointAuspiciousDay[];
+  ics?: string;
+}
+
+export function fetchCompatibility(
+  baziA: string,
+  genderA: string,
+  baziB: string,
+  genderB: string,
+  options?: {
+    includeJointDays?: boolean;
+    includeIcs?: boolean;
+    eventType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    topN?: number;
+  }
+): Promise<CompatibilityResponse> {
+  return fetchJson<CompatibilityResponse>("/bazi/compatibility", {
+    method: "POST",
+    body: JSON.stringify({
+      bazi_a: baziA,
+      gender_a: genderA,
+      bazi_b: baziB,
+      gender_b: genderB,
+      include_joint_days: options?.includeJointDays ?? true,
+      include_ics: options?.includeIcs ?? true,
+      event_type: options?.eventType ?? "marriage",
+      date_from: options?.dateFrom,
+      date_to: options?.dateTo,
+      top_n: options?.topN ?? 8,
+    }),
+  });
 }

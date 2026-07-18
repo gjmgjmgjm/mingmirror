@@ -11,6 +11,8 @@ interface PillarsChartProps {
   bazi: string;
   showHiddenStems?: boolean;
   animate?: boolean;
+  /** 每柱神煞名(来自报告 shensha section 的 by_pillar),键为 年柱/月柱/日柱/时柱 */
+  shenshaByPillar?: Record<string, string[]>;
 }
 
 const PILLAR_LABELS = ["年柱", "月柱", "日柱", "时柱"];
@@ -19,6 +21,7 @@ export default function PillarsChart({
   bazi,
   showHiddenStems = true,
   animate = false,
+  shenshaByPillar,
 }: PillarsChartProps) {
   const parsed = parseBazi(bazi);
   if (!parsed) return null;
@@ -89,6 +92,7 @@ export default function PillarsChart({
               showHiddenStems={showHiddenStems}
               delay={animate ? index * 120 + 260 : 0}
               animate={animate}
+              shensha={shenshaByPillar?.[PILLAR_LABELS[index]]}
             />
           ))}
         </div>
@@ -110,6 +114,7 @@ interface PillarCardProps {
   showHiddenStems: boolean;
   delay: number;
   animate: boolean;
+  shensha?: string[];
 }
 
 function PillarCard({
@@ -119,6 +124,7 @@ function PillarCard({
   showHiddenStems,
   delay,
   animate,
+  shensha,
 }: PillarCardProps) {
   const [revealed, setRevealed] = useState(!animate);
 
@@ -164,6 +170,20 @@ function PillarCard({
         <div className="flex w-full flex-wrap justify-center gap-1 border-t border-ink-300/10 pt-2 dark:border-ink-500/10">
           {hidden.map((stem) => (
             <HiddenStem key={stem} stem={stem} />
+          ))}
+        </div>
+      )}
+
+      {shensha && shensha.length > 0 && (
+        <div className="mt-2 flex w-full flex-wrap justify-center gap-1 border-t border-ink-300/10 pt-2 dark:border-ink-500/10">
+          {shensha.map((name) => (
+            <span
+              key={name}
+              className="rounded bg-gold/15 px-1.5 py-0.5 text-[10px] text-gold"
+              title={`${name} · 此柱所带神煞`}
+            >
+              {name}
+            </span>
           ))}
         </div>
       )}

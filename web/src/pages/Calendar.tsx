@@ -24,6 +24,8 @@ const EVENT_OPTIONS = [
   { value: "travel", label: "出行" },
   { value: "signing", label: "签约" },
   { value: "interview", label: "求职" },
+  { value: "surgery", label: "手术" },
+  { value: "investment", label: "投资" },
 ];
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
@@ -50,24 +52,56 @@ function scoreBadge(score: number): string {
   return "bg-vermilion text-white";
 }
 
-function downloadIcs(dateStr: string, label: string): void {
+/** 单日 .ics(含理由与吉时);也可直接使用服务端批量 ics。 */
+function downloadIcsDay(day: AuspiciousDay, label: string): void {
+  const dateStr = day.date;
   const dt = dateStr.replace(/-/g, "");
+  const next = new Date(dateStr + "T12:00:00");
+  next.setDate(next.getDate() + 1);
+  const dtEnd = isoOf(next).replace(/-/g, "");
+  const best = day.best_hour?.label || day.best_hour?.clock || "";
+  const desc = [
+    `评分:${day.score}`,
+    `日柱:${day.day_pillar}`,
+    day.reasoning ? `理由:${day.reasoning}` : "",
+    best ? `吉时:${best}` : "",
+    day.dos?.length ? `宜:${day.dos.join("、")}` : "",
+    day.avoids?.length ? `忌:${day.avoids.join("、")}` : "",
+    "来源:命镜择日引擎(用神+冲合)",
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,");
   const ics = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//MingMirror//ZH",
+    "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT",
     `UID:${dateStr}@mingmirror`,
     `DTSTART;VALUE=DATE:${dt}`,
-    `SUMMARY:命镜择日·${label}`,
+    `DTEND;VALUE=DATE:${dtEnd}`,
+    `SUMMARY:命镜择日·${label}·${day.day_pillar}(${day.score}分)`,
+    `DESCRIPTION:${desc}`,
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");
-  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  triggerDownload(ics, `mingmirror_${dateStr}.ics`);
+}
+
+function downloadIcsBulk(icsText: string, label: string): void {
+  if (!icsText) return;
+  triggerDownload(icsText, `mingmirror_${label}_择日.ics`);
+}
+
+function triggerDownload(content: string, filename: string): void {
+  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `mingmirror_${dateStr}.ics`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -141,7 +175,9 @@ export default function Calendar() {
           chart.gender || "male",
           eventType,
           dateFrom,
-          dateTo
+          dateTo,
+          12,
+          { includeIcs: true, hourTopK: 3 }
         );
         if (!cancelled) setData(res);
       } catch (err) {
@@ -159,7 +195,7 @@ export default function Calendar() {
     return (
       <EmptyState
         title="暂无命盘"
-        description="请先在首页输入八字信息,择日引擎将结合你的用神喜忌推荐吉日。"
+        description="请先在首页输入八字信息,择日引擎将结合你的用神喜忌推荐吉日与吉时。"
         action={
           <Link to="/" className="btn-primary inline-flex">
             前往首页
@@ -170,7 +206,7 @@ export default function Calendar() {
   }
 
   const days = data?.days ?? [];
-  const topDays = days.slice(0, 8);
+  const topDays = data?.top?.length ? data.top.slice(0, 8) : days.slice(0, 8);
   const eventLabel =
     EVENT_OPTIONS.find((e) => e.value === eventType)?.label ?? eventType;
 
@@ -178,7 +214,7 @@ export default function Calendar() {
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="择日引擎"
-        subtitle={`结合命主用神喜忌与冲合,为目标推荐良辰吉日 · ${chart.bazi}`}
+        subtitle={`结合命主用神喜忌、冲合与吉时,为目标推荐良辰 · ${chart.bazi}`}
       />
 
       <CloudDivider variant="gold" />
@@ -193,7 +229,7 @@ export default function Calendar() {
           />
         </div>
         {data && (data.useful_gods.length > 0 || data.taboo_gods.length > 0) && (
-          <div className="flex flex-wrap gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="rounded-lg bg-jade/10 px-3 py-1.5 text-jade dark:bg-jade/15">
               命主用神:{data.useful_gods.join("、") || "—"}
             </span>
@@ -203,6 +239,16 @@ export default function Calendar() {
             <span className="rounded-lg bg-ink-100/60 px-3 py-1.5 text-ink-500 dark:bg-ink-800/60">
               未来 60 天
             </span>
+            {data.ics && (
+              <button
+                type="button"
+                onClick={() => downloadIcsBulk(data.ics!, eventLabel)}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-gold/15 px-3 py-1.5 text-xs font-medium text-gold transition hover:bg-gold/25"
+              >
+                <Download className="h-3.5 w-3.5" />
+                导出推荐日日历
+              </button>
+            )}
           </div>
         )}
       </SectionCard>
@@ -218,7 +264,7 @@ export default function Calendar() {
               <>
                 <span className="font-display text-vermilion">一</span>、良辰吉日 · {eventLabel}
                 <span className="ml-2 text-xs font-normal text-jade">
-                  ✓ 基于用神 + 冲合规则
+                  ✓ 用神 + 冲合 + 吉时
                 </span>
               </>
             }
@@ -253,17 +299,56 @@ export default function Calendar() {
                     </div>
                     <div className="mb-1 text-xs text-ink-500 dark:text-ink-400">
                       当日透「{d.shishen}」
+                      {d.best_hour && (
+                        <span className="ml-2 text-jade">
+                          · 吉时 {d.best_hour.label || d.best_hour.clock}
+                        </span>
+                      )}
                     </div>
+                    {Array.isArray(d.shensha) && d.shensha.length > 0 && (
+                      <div className="mb-1 flex flex-wrap gap-1">
+                        {d.shensha.map((ss, j) => (
+                          <span
+                            key={`${ss.name}-${j}`}
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              ss.effect === "凶"
+                                ? "bg-vermilion/15 text-vermilion"
+                                : "bg-jade/15 text-jade"
+                            }`}
+                            title={ss.info}
+                          >
+                            {ss.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <p className="mb-2 text-xs leading-relaxed text-ink-600 dark:text-ink-300">
                       {d.reasoning}
                     </p>
+                    {d.hours && d.hours.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1">
+                        {d.hours.map((h) => (
+                          <span
+                            key={h.branch}
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              h.recommended
+                                ? "bg-jade/15 text-jade"
+                                : "bg-ink-100/80 text-ink-500 dark:bg-ink-700/60 dark:text-ink-400"
+                            }`}
+                            title={h.reasoning}
+                          >
+                            {h.branch}时 {h.score}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1 truncate text-[11px] text-jade">
                         宜 {d.dos.join("、")}
                       </div>
                       <button
                         type="button"
-                        onClick={() => downloadIcs(d.date, eventLabel)}
+                        onClick={() => downloadIcsDay(d, eventLabel)}
                         className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-gold/15 px-2 py-1 text-[11px] text-gold transition hover:bg-gold/25"
                       >
                         <Download className="h-3 w-3" />
@@ -311,9 +396,10 @@ export default function Calendar() {
 
           <CloudDivider variant="ink" />
           <p className="text-center text-xs leading-relaxed text-ink-400">
-            择日基于命主用神(对齐穷通宝鉴)与冲合规则评分,为趋势参考;
+            择日基于命主用神(对齐穷通宝鉴)、冲合、十二时辰评分与日干支神煞
+            (天乙贵人/文昌/禄/金舆/羊刃),为趋势参考;
             <br />
-            传统黄历宜忌因无数据源未纳入,重大事项建议兼顾多方。
+            未含完整黄历建除宜忌表,重大事项建议兼顾多方。
           </p>
         </>
       )}

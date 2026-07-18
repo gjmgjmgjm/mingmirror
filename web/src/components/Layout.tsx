@@ -12,8 +12,12 @@ import {
   Sun,
   Moon,
   Library,
+  CreditCard,
+  LineChart,
+  PencilLine,
 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
+import { useChart } from "../contexts/ChartContext";
 import type { ReactNode } from "react";
 
 interface LayoutProps {
@@ -31,11 +35,14 @@ const navItems = [
   { path: "/script", label: "剧本", icon: BookOpen },
   { path: "/events", label: "校准", icon: Target },
   { path: "/cases", label: "案例", icon: Library },
+  { path: "/pricing", label: "套餐", icon: CreditCard },
+  { path: "/admin", label: "看板", icon: LineChart },
 ];
 
 export default function Layout({ children }: LayoutProps) {
   const { theme, toggle } = useTheme();
   const location = useLocation();
+  const { chart } = useChart();
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -50,18 +57,34 @@ export default function Layout({ children }: LayoutProps) {
             MingMirror
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={toggle}
-          className="rounded-xl p-2 text-ink-600 transition hover:bg-ink-200 dark:text-ink-300 dark:hover:bg-ink-800"
-          aria-label={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-        >
-          {theme === "dark" ? (
-            <Sun className="h-5 w-5" />
-          ) : (
-            <Moon className="h-5 w-5" />
+        <div className="flex items-center gap-2">
+          {chart && (
+            <Link
+              to="/?edit=1"
+              className="flex items-center gap-1.5 rounded-xl border border-ink-300/30 bg-ink-200/50 px-3 py-1.5 transition hover:border-vermilion/50 hover:bg-vermilion/5 dark:border-ink-600/30 dark:bg-ink-800/50"
+              title="修改出生信息"
+              aria-label="修改出生信息"
+            >
+              <ScrollText className="h-4 w-4 text-vermilion" />
+              <span className="hidden max-w-[10rem] truncate font-mono text-xs text-ink-700 dark:text-ink-200 sm:inline">
+                {chart.bazi}
+              </span>
+              <PencilLine className="h-3.5 w-3.5 text-ink-400" />
+            </Link>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={toggle}
+            className="rounded-xl p-2 text-ink-600 transition hover:bg-ink-200 dark:text-ink-300 dark:hover:bg-ink-800"
+            aria-label={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+          >
+            {theme === "dark" ? (
+              <Sun className="h-5 w-5" />
+            ) : (
+              <Moon className="h-5 w-5" />
+            )}
+          </button>
+        </div>
       </header>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center gap-1 overflow-x-auto border-t border-ink-300/20 bg-ink-100/95 px-2 scrollbar-hide dark:border-ink-500/20 dark:bg-ink-900/95 md:bottom-auto md:top-16 md:h-[calc(100vh-4rem)] md:w-56 md:flex-col md:items-stretch md:justify-start md:overflow-visible md:border-r md:border-t-0 md:px-3 md:py-6">

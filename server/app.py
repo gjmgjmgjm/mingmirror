@@ -120,6 +120,8 @@ class BaziYearlyRequest(BaseModel):
     birth_time: str = "00:00"
     calendar_type: str = "solar"
     mode: str = "10y"
+    start_year: Optional[int] = None
+    years: Optional[int] = None
 
 
 class BaziYearlyResponse(BaseModel):
@@ -160,6 +162,9 @@ class BaziAuspiciousRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     top_n: int = 10
+    hour_top_k: int = 3
+    # 为 True 时在响应中附带 ics 文本(推荐日批量日历)
+    include_ics: bool = False
 
 
 class BaziExtractRequest(BaseModel):
@@ -195,6 +200,34 @@ class QizhengAnalyzeRequest(BaseModel):
 
 
 class QizhengAnalyzeResponse(BaseModel):
+    bazi: str
+    result: Dict[str, Any]
+
+
+class ZiweiAnalyzeRequest(BaseModel):
+    bazi: Optional[str] = None
+    question: str = ""
+    gender: str = "male"
+    birth_datetime: Optional[str] = None
+    birth_date: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
+
+
+class ZiweiAnalyzeResponse(BaseModel):
+    bazi: str
+    result: Dict[str, Any]
+
+
+class ZiweiYearlyRequest(BaseModel):
+    bazi: str
+    gender: str = "male"
+    birth_date: str = ""
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+    years: int = 10
+
+
+class ZiweiYearlyResponse(BaseModel):
     bazi: str
     result: Dict[str, Any]
 
@@ -281,6 +314,10 @@ class DestinyAnalyzeRequest(BaseModel):
     gender: Optional[str] = None
     birth_datetime: Optional[str] = None
     location: Optional[Dict[str, Any]] = None
+    # If true (default), load latest calibration adjusted_weights for this chart.
+    use_calibration_weights: bool = True
+    # Explicit override; wins over stored calibration when provided.
+    system_weights: Optional[Dict[str, float]] = None
 
 
 class DestinyAnalyzeResponse(BaseModel):
@@ -291,6 +328,8 @@ class DestinyAnalyzeResponse(BaseModel):
     final_summary: str
     overall_confidence: str
     strategy: Optional[str] = None
+    system_weights: Optional[Dict[str, float]] = None
+    weights_source: Optional[str] = None
 
 
 class DestinyCouncilRequest(BaseModel):
@@ -301,6 +340,8 @@ class DestinyCouncilRequest(BaseModel):
     gender: Optional[str] = None
     birth_datetime: Optional[str] = None
     location: Optional[Dict[str, Any]] = None
+    use_calibration_weights: bool = True
+    system_weights: Optional[Dict[str, float]] = None
 
 
 class DestinyDailyRequest(BaseModel):
@@ -344,6 +385,120 @@ class CalibrationResponse(BaseModel):
     adjusted_weights: Dict[str, float]
     suggested_hour_offset: Optional[int] = None
     events: List[Dict[str, Any]]
+    calibration_id: Optional[str] = None
+    created_at: Optional[int] = None
+
+
+class CompatibilityRequest(BaseModel):
+    bazi_a: str
+    gender_a: str = "male"
+    bazi_b: str
+    gender_b: str = "female"
+    # Off by default so simple score calls stay cheap; frontend opts in.
+    include_joint_days: bool = False
+    include_ics: bool = False
+    event_type: str = "marriage"
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    top_n: int = 8
+
+
+class ChartCreateRequest(BaseModel):
+    bazi: str
+    gender: str = "male"
+    birth_date: str = ""
+    birth_time: str = ""
+    calendar_type: str = "solar"
+    location: Optional[Dict[str, Any]] = None
+    label: str = ""
+    # If true, reuse most recent chart with same bazi when present.
+    reuse_existing: bool = True
+
+
+class PackageExportOptions(BaseModel):
+    """流年附录区间（与紫微/七政前端控件一致）。"""
+
+    liunian_start_year: Optional[int] = None
+    liunian_years: int = 10
+
+
+class BaziPackageExportRequest(ChartCreateRequest):
+    liunian_start_year: Optional[int] = None
+    liunian_years: int = 10
+
+
+class ChartResponse(BaseModel):
+    id: str
+    bazi: str
+    gender: str
+    birth_date: str = ""
+    birth_time: str = ""
+    calendar_type: str = "solar"
+    location: Optional[Dict[str, Any]] = None
+    label: str = ""
+    created_at: int = 0
+    updated_at: int = 0
+
+
+class TrackEventRequest(BaseModel):
+    event: str
+    device_id: str = ""
+    chart_id: str = ""
+    props: Optional[Dict[str, Any]] = None
+
+
+class EntitlementActivateRequest(BaseModel):
+    device_id: str
+    action: str = "pro"  # pro | credit
+    code: str = ""  # demo activation code
+    days: int = 30
+    credits: int = 1
+
+
+class EntitlementConsumeRequest(BaseModel):
+    device_id: str
+
+
+class PaymentWebhookRequest(BaseModel):
+    """Generic payment provider payload (Stripe/Lemon/wechat-style).
+
+    Map provider fields into these canonical keys in the adapter layer.
+    """
+
+    provider: str = "demo"
+    external_id: str  # provider payment / order id (idempotent)
+    device_id: str
+    product: str = "package"  # pro | package | ...
+    amount_cents: int = 0
+    currency: str = "CNY"
+    status: str = "succeeded"
+    days: int = 30
+    credits: int = 1
+    raw: Optional[Dict[str, Any]] = None
+
+
+class CheckoutRequest(BaseModel):
+    """Demo / adapter checkout: creates ledger + grants entitlement.
+
+    Real PSP: use webhook fulfillment; this endpoint is the closed-loop
+    path for demo provider and local smoke tests.
+    """
+
+    device_id: str
+    product: str = "pro"  # pro | package
+    provider: str = "demo"
+    days: int = 30
+    credits: int = 1
+    amount_cents: int = 0
+    currency: str = "CNY"
+    external_id: str = ""
+
+
+class AdminGrantRequest(BaseModel):
+    device_id: str
+    action: str = "pro"  # pro | credit
+    days: int = 30
+    credits: int = 1
 
 
 class ConfigOverrideRequest(BaseModel):
@@ -714,6 +869,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
             birth_time=req.birth_time,
             calendar_type=req.calendar_type,
             mode=req.mode,
+            start_year=req.start_year,
+            years=req.years,
             api_key=ai_cfg.get("api_key") or None,
             base_url=ai_cfg.get("base_url") or None,
             model=ai_cfg.get("model") or None,
@@ -803,6 +960,70 @@ def build_app(config: ConfigLoader) -> FastAPI:
         )
         result = await analyzer.analyze(chart_info, question=req.question)
         return QizhengAnalyzeResponse(bazi=bazi, result=result)
+
+    @app.post("/api/v1/ziwei/analyze", response_model=ZiweiAnalyzeResponse)
+    async def analyze_ziwei(req: ZiweiAnalyzeRequest) -> ZiweiAnalyzeResponse:
+        """Analyze Zi Wei Dou Shu with structural chart (works offline)."""
+        from tools.ziwei.engine import ZiWeiAnalyzer
+
+        bazi = (req.bazi or "").strip()
+        gender = req.gender if req.gender in ("male", "female") else "male"
+        if gender in ("男",):
+            gender = "male"
+        if gender in ("女",):
+            gender = "female"
+
+        chart_info: Dict[str, Any] = {
+            "bazi": bazi,
+            "gender": gender,
+        }
+        if req.birth_datetime:
+            chart_info["birth_datetime"] = req.birth_datetime
+        if req.birth_date:
+            chart_info["birth_date"] = req.birth_date
+        if req.location:
+            chart_info["location"] = req.location
+        elif req.birth_datetime:
+            # minimal location so strict LLM path still works if key set
+            chart_info["location"] = {
+                "longitude": 116.4074,
+                "latitude": 39.9042,
+                "timezone": "Asia/Shanghai",
+            }
+
+        if not bazi and not req.birth_datetime:
+            raise HTTPException(status_code=400, detail="bazi or birth_datetime required")
+
+        # If only datetime, still allow engine to run; bazi may be empty in response
+        ai_cfg = config.get("bazi_ai") or {}
+        analyzer = ZiWeiAnalyzer(
+            api_key=ai_cfg.get("api_key") or None,
+            base_url=ai_cfg.get("base_url") or None,
+            model=ai_cfg.get("model") or None,
+        )
+        result = await analyzer.analyze(chart_info, question=req.question)
+        out_bazi = bazi or str((result.get("basic_info") or {}).get("chart") or "")
+        return ZiweiAnalyzeResponse(bazi=out_bazi, result=result)
+
+    @app.post("/api/v1/ziwei/yearly", response_model=ZiweiYearlyResponse)
+    async def ziwei_yearly(req: ZiweiYearlyRequest) -> ZiweiYearlyResponse:
+        """紫微流年：太岁入宫 + 流年四化 + 所在大限（确定性结构层）。"""
+        from tools.ziwei.chart import yearly_bundle
+
+        gender = req.gender if req.gender in ("male", "female") else "male"
+        if req.gender in ("女", "女命"):
+            gender = "female"
+        result = yearly_bundle(
+            req.bazi.strip(),
+            gender=gender,
+            birth_date=req.birth_date or "",
+            start_year=req.start_year,
+            end_year=req.end_year,
+            years=req.years,
+        )
+        if result.get("error") and not result.get("chart"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return ZiweiYearlyResponse(bazi=req.bazi.strip(), result=result)
 
     @app.post("/api/v1/qizheng/yearly", response_model=QizhengYearlyResponse)
     async def qizheng_yearly(req: QizhengYearlyRequest) -> QizhengYearlyResponse:
@@ -980,8 +1201,30 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         return _caller
 
-    def _destiny_analyze(req: Any, default_strategy: str) -> DestinyAnalyzeResponse:
-        """Run multi-destiny analysis and return a response model."""
+    def _resolve_system_weights(req: Any, chart_bazi: str) -> Dict[str, float]:
+        """Prefer explicit request weights, else latest calibration for chart."""
+        explicit = getattr(req, "system_weights", None) or None
+        if isinstance(explicit, dict) and explicit:
+            return {str(k): float(v) for k, v in explicit.items()}
+        if not getattr(req, "use_calibration_weights", True):
+            return {}
+        store = getattr(app.state, "event_store", None)
+        latest_fn = getattr(store, "latest_calibration", None) if store else None
+        if not callable(latest_fn):
+            return {}
+        try:
+            latest = latest_fn(chart_bazi.strip())
+        except Exception:  # pragma: no cover
+            return {}
+        if not latest:
+            return {}
+        weights = latest.get("adjusted_weights") or {}
+        if not isinstance(weights, dict):
+            return {}
+        return {str(k): float(v) for k, v in weights.items() if v is not None}
+
+    def _destiny_analyze(req: Any, default_strategy: str):
+        """Run multi-destiny analysis and return (analyzer, chart)."""
         try:
             from tools.destiny.contract import ChartInfo
             from tools.destiny.ensemble import MultiDestinyAnalyzer
@@ -1003,11 +1246,13 @@ def build_app(config: ConfigLoader) -> FastAPI:
         if qizheng_caller is not None:
             callables["qizheng"] = qizheng_caller
 
+        weights = _resolve_system_weights(req, req.bazi)
         analyzer = MultiDestinyAnalyzer(
             systems=req.systems,
             callables=callables,
             config=config.get("bazi_ai") or {},
             strategy=strategy,
+            system_weights=weights or None,
         )
         return analyzer, ChartInfo(
             bazi=req.bazi.strip(),
@@ -1049,26 +1294,97 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         return _analyzer
 
-    # Event calibration storage (persistent JSONL by default).
+    # Event calibration + chart identity + product plane: same SQLite file.
+    _chart_store = None
+    _product_store = None
     try:
-        from tools.destiny.calibrator import DestinyCalibrator, JsonlEventStore
+        from tools.destiny.calibrator import DestinyCalibrator, SqliteEventStore
+        from tools.destiny.chart_store import ChartStore
+        from tools.destiny.product_store import ProductStore
 
         _download_path = Path(config.get("path", "./Downloaded"))
-        _event_store_path = Path(config.get("event_store_path", _download_path / "events.jsonl"))
-        _event_store_path.parent.mkdir(parents=True, exist_ok=True)
-        _event_store = JsonlEventStore(_event_store_path)
+        _download_path.mkdir(parents=True, exist_ok=True)
+        _event_db = Path(
+            config.get("event_store_db", _download_path / "mingmirror_events.db")
+        )
+        _event_jsonl = Path(
+            config.get("event_store_path", _download_path / "events.jsonl")
+        )
+        _event_store = SqliteEventStore(
+            _event_db,
+            migrate_from_jsonl=_event_jsonl if _event_jsonl.exists() else None,
+        )
+        _chart_store = ChartStore(_event_db)
+        _product_store = ProductStore(_event_db)
         _calibrator = DestinyCalibrator(
             analyzer=_build_calibration_analyzer(),
             event_store=_event_store,
         )
         app.state.calibrator = _calibrator
         app.state.event_store = _event_store
+        app.state.chart_store = _chart_store
+        app.state.product_store = _product_store
     except Exception as exc:  # pragma: no cover - optional subsystem
         _event_store = None
         _calibrator = None
+        _chart_store = None
+        _product_store = None
         app.state.calibrator = None
         app.state.event_store = None
-        logger.debug("Event calibration not available: %s", exc)
+        app.state.chart_store = None
+        app.state.product_store = None
+        logger.debug("Event calibration / chart store not available: %s", exc)
+
+    import os as _os
+
+    _demo_code = str(
+        config.get("mingmirror_demo_code")
+        or _os.environ.get("MINGMIRROR_DEMO_CODE", "demo-pro")
+    )
+    _admin_token = str(
+        config.get("mingmirror_admin_token")
+        or _os.environ.get("MINGMIRROR_ADMIN_TOKEN", "")
+    ).strip()
+    _webhook_secret = str(
+        config.get("mingmirror_webhook_secret")
+        or _os.environ.get("MINGMIRROR_WEBHOOK_SECRET", "")
+    ).strip()
+
+    def _require_admin(request: Request) -> None:
+        """Protect admin read APIs. If token unset, allow in dev (open)."""
+        if not _admin_token:
+            return
+        header = (request.headers.get("X-Admin-Token") or "").strip()
+        query_token = (request.query_params.get("admin_token") or "").strip()
+        if header != _admin_token and query_token != _admin_token:
+            raise HTTPException(status_code=401, detail="admin token required")
+
+    def _require_webhook(request: Request) -> None:
+        """Protect payment webhook. If secret unset, allow demo mode."""
+        if not _webhook_secret:
+            return
+        header = (
+            request.headers.get("X-Webhook-Secret")
+            or request.headers.get("X-Mingmirror-Secret")
+            or ""
+        ).strip()
+        if header != _webhook_secret:
+            raise HTTPException(status_code=401, detail="invalid webhook secret")
+
+    def _resolve_chart_scope(chart_id: str) -> tuple:
+        """Return (event_store_key, bazi_for_analysis) for UUID or legacy bazi."""
+        key = (chart_id or "").strip()
+        if not key:
+            raise HTTPException(status_code=400, detail="chart_id is required")
+        if _chart_store is not None:
+            from tools.destiny.chart_store import is_chart_uuid
+
+            if is_chart_uuid(key):
+                rec = _chart_store.get(key)
+                if rec is None:
+                    raise HTTPException(status_code=404, detail="chart not found")
+                return key, rec.bazi
+        return key, key
 
     @app.post("/api/v1/destiny/analyze", response_model=DestinyAnalyzeResponse)
     async def destiny_analyze(req: DestinyAnalyzeRequest) -> DestinyAnalyzeResponse:
@@ -1083,6 +1399,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
             final_summary=result.get("final_summary", ""),
             overall_confidence=result.get("overall_confidence", "low"),
             strategy=result.get("strategy"),
+            system_weights=result.get("system_weights"),
+            weights_source=result.get("weights_source"),
         )
 
     @app.post("/api/v1/destiny/council", response_model=DestinyAnalyzeResponse)
@@ -1098,6 +1416,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
             final_summary=result.get("final_summary", ""),
             overall_confidence=result.get("overall_confidence", "low"),
             strategy=result.get("strategy"),
+            system_weights=result.get("system_weights"),
+            weights_source=result.get("weights_source"),
         )
 
     @app.post("/api/v1/destiny/daily")
@@ -1125,11 +1445,23 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         return daily_fortune(req.bazi.strip(), target_date)
 
+    @app.get("/api/v1/bazi/auspicious/event-types")
+    async def bazi_auspicious_event_types() -> Dict[str, Any]:
+        """列出择日引擎支持的事项类型。"""
+        try:
+            from tools.bazi_ai.auspicious import event_types
+        except Exception as exc:  # pragma: no cover - optional subsystem
+            raise HTTPException(
+                status_code=503,
+                detail=f"auspicious subsystem not available: {exc}",
+            ) from exc
+        return {"event_types": event_types()}
+
     @app.post("/api/v1/bazi/auspicious")
     async def bazi_auspicious(req: BaziAuspiciousRequest) -> Dict[str, Any]:
-        """目标导向个性化吉日推荐(命主用神忌神 + 冲合 + 目标权重)。"""
+        """目标导向个性化吉日推荐(命主用神忌神 + 冲合 + 目标权重 + 吉时)。"""
         try:
-            from tools.bazi_ai.auspicious import auspicious_days
+            from tools.bazi_ai.auspicious import auspicious_days, to_ics
         except Exception as exc:  # pragma: no cover - optional subsystem
             raise HTTPException(
                 status_code=503,
@@ -1151,10 +1483,19 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 detail=f"invalid date format: {exc}",
             ) from exc
 
-        return auspicious_days(
-            req.bazi.strip(), req.gender, req.event_type,
-            date_from, date_to, req.top_n,
+        result = auspicious_days(
+            req.bazi.strip(),
+            req.gender,
+            req.event_type,
+            date_from,
+            date_to,
+            req.top_n,
+            hour_top_k=req.hour_top_k,
         )
+        if req.include_ics and not result.get("error"):
+            result = dict(result)
+            result["ics"] = to_ics(result, top_n=req.top_n)
+        return result
 
     @app.post("/api/v1/destiny/script", response_model=DestinyScriptResponse)
     async def destiny_script(req: DestinyScriptRequest) -> DestinyScriptResponse:
@@ -1204,19 +1545,488 @@ def build_app(config: ConfigLoader) -> FastAPI:
             "all": ["bazi", "ziwei", "qizheng"],
         }
 
+    # ------------------------------------------------------------------
+    # Chart identity (product layer)
+    # ------------------------------------------------------------------
+    @app.post("/api/v1/charts", response_model=ChartResponse)
+    async def create_chart(req: ChartCreateRequest) -> ChartResponse:
+        """Create (or reuse) a persistent chart with UUID."""
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        from tools.destiny.chart_store import ChartRecord
+
+        bazi = req.bazi.strip()
+        if not bazi:
+            raise HTTPException(status_code=400, detail="bazi is required")
+        if req.reuse_existing:
+            existing = _chart_store.get_by_bazi(bazi)
+            if existing is not None:
+                # Refresh birth metadata if provided
+                if req.birth_date or req.birth_time or req.location or req.label:
+                    existing.gender = req.gender or existing.gender
+                    existing.birth_date = req.birth_date or existing.birth_date
+                    existing.birth_time = req.birth_time or existing.birth_time
+                    existing.calendar_type = req.calendar_type or existing.calendar_type
+                    if req.location is not None:
+                        existing.location = req.location
+                    if req.label:
+                        existing.label = req.label
+                    existing = _chart_store.save(existing)
+                return ChartResponse(**existing.to_dict())
+        try:
+            rec = ChartRecord.create(
+                bazi=bazi,
+                gender=req.gender,
+                birth_date=req.birth_date,
+                birth_time=req.birth_time,
+                calendar_type=req.calendar_type,
+                location=req.location,
+                label=req.label,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        rec = _chart_store.save(rec)
+        return ChartResponse(**rec.to_dict())
+
+    @app.get("/api/v1/charts", response_model=List[ChartResponse])
+    async def list_charts(limit: int = 50) -> List[ChartResponse]:
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        return [ChartResponse(**c.to_dict()) for c in _chart_store.list(limit=limit)]
+
+    @app.get("/api/v1/charts/{chart_id}", response_model=ChartResponse)
+    async def get_chart(chart_id: str) -> ChartResponse:
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        rec = _chart_store.get(chart_id.strip())
+        if rec is None:
+            raise HTTPException(status_code=404, detail="chart not found")
+        return ChartResponse(**rec.to_dict())
+
+    @app.delete("/api/v1/charts/{chart_id}")
+    async def delete_chart(chart_id: str) -> Dict[str, Any]:
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        ok = _chart_store.delete(chart_id.strip())
+        if not ok:
+            raise HTTPException(status_code=404, detail="chart not found")
+        return {"deleted": True, "id": chart_id}
+
+    @app.post("/api/v1/charts/{chart_id}/export/package")
+    async def export_chart_package(
+        chart_id: str,
+        req: PackageExportOptions = PackageExportOptions(),
+    ) -> Dict[str, Any]:
+        """Standard product package: 命书 markdown + HTML (print to PDF) + 择日."""
+        opts = req
+        if _chart_store is None:
+            # Allow legacy bazi-as-id without store for export
+            bazi = chart_id.strip()
+            gender = "male"
+            birth_info: Dict[str, Any] = {}
+            label = bazi
+            cid = ""
+        else:
+            from tools.destiny.chart_store import is_chart_uuid
+
+            key = chart_id.strip()
+            if is_chart_uuid(key):
+                rec = _chart_store.get(key)
+                if rec is None:
+                    raise HTTPException(status_code=404, detail="chart not found")
+                bazi, gender = rec.bazi, rec.gender
+                birth_info = {
+                    "birth_date": rec.birth_date,
+                    "birth_time": rec.birth_time,
+                    "calendar_type": rec.calendar_type,
+                }
+                label, cid = rec.label, rec.id
+            else:
+                bazi, gender, birth_info, label, cid = key, "male", {}, key, ""
+
+        from tools.bazi_ai.report_export import build_product_package
+
+        return build_product_package(
+            bazi,
+            gender=gender,
+            birth_info=birth_info,
+            chart_id=cid,
+            label=label,
+            include_auspicious=True,
+            liunian_start_year=opts.liunian_start_year,
+            liunian_years=opts.liunian_years,
+        )
+
+    @app.post("/api/v1/bazi/export/package")
+    async def export_bazi_package(req: BaziPackageExportRequest) -> Dict[str, Any]:
+        """Export product package from raw birth/bazi payload (no UUID required)."""
+        from tools.bazi_ai.report_export import build_product_package
+
+        return build_product_package(
+            req.bazi.strip(),
+            gender=req.gender,
+            birth_info={
+                "birth_date": req.birth_date,
+                "birth_time": req.birth_time,
+                "calendar_type": req.calendar_type,
+            },
+            label=req.label or req.bazi.strip(),
+            include_auspicious=True,
+            liunian_start_year=req.liunian_start_year,
+            liunian_years=req.liunian_years,
+        )
+
+    # ------------------------------------------------------------------
+    # Product: analytics funnel + entitlements + demo charts
+    # ------------------------------------------------------------------
+    @app.get("/api/v1/product/demo-charts")
+    async def product_demo_charts() -> Dict[str, Any]:
+        """Curated sample charts for one-click product demos (no auth)."""
+        from tools.destiny.demo_charts import list_demo_charts
+
+        items = list_demo_charts()
+        return {
+            "count": len(items),
+            "items": items,
+            "note": "结构层演示样例；可直接用于流年/紫微/七政/交付包导出。",
+            "pricing_demo_code": "demo-pro",
+        }
+
+    @app.get("/api/v1/product/demo-charts/{demo_id}")
+    async def product_demo_chart_detail(demo_id: str) -> Dict[str, Any]:
+        from tools.destiny.demo_charts import get_demo_chart
+
+        demo = get_demo_chart(demo_id)
+        if demo is None:
+            raise HTTPException(status_code=404, detail="demo chart not found")
+        return demo
+
+    @app.post("/api/v1/product/demo-charts/{demo_id}/package")
+    async def product_demo_chart_package(
+        demo_id: str,
+        req: PackageExportOptions = PackageExportOptions(),
+    ) -> Dict[str, Any]:
+        """Build a product package for a fixed demo chart (structure layer)."""
+        from tools.bazi_ai.report_export import build_product_package
+        from tools.destiny.demo_charts import demo_chart_as_birth_payload, get_demo_chart
+
+        demo = get_demo_chart(demo_id)
+        if demo is None:
+            raise HTTPException(status_code=404, detail="demo chart not found")
+        payload = demo_chart_as_birth_payload(demo)
+        return build_product_package(
+            payload["bazi"],
+            gender=payload["gender"],
+            birth_info={
+                "birth_date": payload["birth_date"],
+                "birth_time": payload["birth_time"],
+                "calendar_type": payload["calendar_type"],
+            },
+            label=payload["label"],
+            include_auspicious=True,
+            liunian_start_year=req.liunian_start_year,
+            liunian_years=req.liunian_years,
+            chart_id=f"demo:{demo_id}",
+        )
+
+    @app.post("/api/v1/product/track")
+    async def product_track(req: TrackEventRequest) -> Dict[str, Any]:
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        eid = _product_store.track(
+            req.event,
+            device_id=req.device_id,
+            chart_id=req.chart_id,
+            props=req.props,
+        )
+        return {"id": eid, "ok": True}
+
+    @app.get("/api/v1/product/funnel")
+    async def product_funnel(request: Request, days: int = 7) -> Dict[str, Any]:
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        # Public read for demo; when admin token set, require it for privacy.
+        if _admin_token:
+            _require_admin(request)
+        import time as _time
+
+        days = max(1, min(int(days or 7), 90))
+        since = int(_time.time()) - days * 86400
+        summary = _product_store.funnel_summary(since_unix=since)
+        summary["days"] = days
+        return summary
+
+    @app.get("/api/v1/admin/overview")
+    async def admin_overview(request: Request, days: int = 7) -> Dict[str, Any]:
+        """Admin dashboard payload: funnel + payments + entitlements + charts."""
+        _require_admin(request)
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        import time as _time
+
+        days = max(1, min(int(days or 7), 90))
+        since = int(_time.time()) - days * 86400
+        funnel = _product_store.funnel_summary(since_unix=since)
+        funnel["days"] = days
+        payments_summary = _product_store.payment_summary(since_unix=since)
+        payments_summary["days"] = days
+        charts = []
+        if _chart_store is not None:
+            charts = [c.to_dict() for c in _chart_store.list(limit=30)]
+        return {
+            "funnel": funnel,
+            "payments_summary": payments_summary,
+            "recent_payments": _product_store.list_payments(
+                limit=40, since_unix=since
+            ),
+            "recent_events": _product_store.recent_events(limit=40),
+            "entitlements": _product_store.list_entitlements(limit=30),
+            "charts": charts,
+            "admin_auth_required": bool(_admin_token),
+            "demo_code_configured": bool(_demo_code),
+            "webhook_secret_configured": bool(_webhook_secret),
+        }
+
+    @app.post("/api/v1/admin/entitlement/grant")
+    async def admin_grant_entitlement(
+        request: Request, req: AdminGrantRequest
+    ) -> Dict[str, Any]:
+        """Manually grant pro or package credits (ops tooling)."""
+        _require_admin(request)
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        device_id = (req.device_id or "").strip()
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+        try:
+            rec = _product_store.admin_grant(
+                device_id,
+                action=req.action,
+                days=max(1, min(req.days, 365)),
+                credits=max(1, min(req.credits, 50)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "entitlement": rec.to_dict()}
+
+    @app.post("/api/v1/product/checkout")
+    async def product_checkout(req: CheckoutRequest) -> Dict[str, Any]:
+        """Closed-loop checkout (demo provider): ledger + entitlement.
+
+        Production adapters should create a pending order with the PSP and
+        fulfill via ``/product/payment/webhook``; this path is for demo smoke
+        and local e2e without an external gateway.
+        """
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        device_id = (req.device_id or "").strip()
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+        product = (req.product or "pro").strip().lower()
+        if product not in (
+            "pro",
+            "pro_month",
+            "subscription_pro",
+            "mingmirror_pro",
+            "credit",
+            "package",
+            "package_1",
+            "mingmirror_package",
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="product must be pro or package (or known SKU aliases)",
+            )
+        result = _product_store.checkout(
+            device_id=device_id,
+            product=product,
+            provider=req.provider or "demo",
+            amount_cents=req.amount_cents,
+            currency=req.currency or "CNY",
+            days=max(1, min(req.days, 365)),
+            credits=max(1, min(req.credits, 50)),
+            external_id=req.external_id or "",
+        )
+        return result
+
+    @app.get("/api/v1/product/payments")
+    async def product_list_payments(
+        device_id: str = "",
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """List payments for a device (user self-serve history)."""
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        if not (device_id or "").strip():
+            raise HTTPException(status_code=400, detail="device_id required")
+        items = _product_store.list_payments(
+            device_id=device_id.strip(), limit=max(1, min(limit, 50))
+        )
+        return {"device_id": device_id.strip(), "count": len(items), "items": items}
+
+    @app.get("/api/v1/product/payment/status")
+    async def product_payment_status(
+        provider: str = "demo",
+        external_id: str = "",
+    ) -> Dict[str, Any]:
+        """Lookup a payment by provider + external order id."""
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        if not (external_id or "").strip():
+            raise HTTPException(status_code=400, detail="external_id required")
+        row = _product_store.get_payment(
+            provider=provider or "demo", external_id=external_id.strip()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="payment not found")
+        ent = _product_store.get_entitlement(row["device_id"]).to_dict()
+        return {"payment": row, "entitlement": ent}
+
+    @app.post("/api/v1/product/payment/webhook")
+    async def payment_webhook(
+        request: Request, req: PaymentWebhookRequest
+    ) -> Dict[str, Any]:
+        """Payment provider webhook → entitlement.
+
+        Idempotent on (provider, external_id). Wire Stripe/LemonSqueezy/wechat
+        by mapping their payload into PaymentWebhookRequest in a thin adapter.
+        """
+        _require_webhook(request)
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        if (req.status or "succeeded").lower() not in (
+            "succeeded",
+            "success",
+            "paid",
+            "complete",
+            "completed",
+        ):
+            return {"ok": False, "reason": f"ignored status={req.status}"}
+        try:
+            ledger = _product_store.record_payment(
+                provider=req.provider,
+                external_id=req.external_id,
+                device_id=req.device_id,
+                product=req.product,
+                amount_cents=req.amount_cents,
+                currency=req.currency,
+                status=req.status,
+                raw=req.raw or req.model_dump(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if ledger.get("duplicate"):
+            ent = _product_store.get_entitlement(req.device_id).to_dict()
+            return {
+                "ok": True,
+                "duplicate": True,
+                "payment_id": ledger.get("payment_id"),
+                "entitlement": ent,
+            }
+
+        ent_rec = _product_store.apply_payment_product(
+            req.device_id,
+            req.product,
+            days=max(1, min(req.days, 365)),
+            credits=max(1, min(req.credits, 50)),
+        )
+        _product_store.track(
+            "payment_webhook",
+            device_id=req.device_id,
+            props={
+                "provider": req.provider,
+                "product": req.product,
+                "external_id": req.external_id,
+                "amount_cents": req.amount_cents,
+            },
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "payment_id": ledger.get("payment_id"),
+            "entitlement": ent_rec.to_dict(),
+        }
+
+    @app.get("/api/v1/product/entitlement")
+    async def product_get_entitlement(device_id: str) -> Dict[str, Any]:
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        if not (device_id or "").strip():
+            raise HTTPException(status_code=400, detail="device_id required")
+        return _product_store.get_entitlement(device_id.strip()).to_dict()
+
+    @app.post("/api/v1/product/entitlement/activate")
+    async def product_activate(req: EntitlementActivateRequest) -> Dict[str, Any]:
+        """Demo activation. Production: replace with payment webhook."""
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        device_id = (req.device_id or "").strip()
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+        action = (req.action or "pro").strip().lower()
+        code = (req.code or "").strip()
+        # Allow empty code only for credit; pro requires demo code
+        if action == "pro":
+            if code != _demo_code:
+                raise HTTPException(
+                    status_code=403,
+                    detail="invalid activation code",
+                )
+            rec = _product_store.activate_pro(device_id, days=max(1, min(req.days, 365)))
+            _product_store.track(
+                "pro_activated", device_id=device_id, props={"days": req.days}
+            )
+            return {"ok": True, "entitlement": rec.to_dict()}
+        if action == "credit":
+            # Soft gate: accept demo code or empty in non-strict demo mode
+            if code and code != _demo_code:
+                raise HTTPException(status_code=403, detail="invalid activation code")
+            rec = _product_store.add_credits(device_id, n=max(1, min(req.credits, 20)))
+            _product_store.track(
+                "credit_purchased",
+                device_id=device_id,
+                props={"credits": req.credits},
+            )
+            return {"ok": True, "entitlement": rec.to_dict()}
+        raise HTTPException(status_code=400, detail="action must be pro or credit")
+
+    @app.post("/api/v1/product/entitlement/consume")
+    async def product_consume(req: EntitlementConsumeRequest) -> Dict[str, Any]:
+        if _product_store is None:
+            raise HTTPException(status_code=503, detail="product store not available")
+        device_id = (req.device_id or "").strip()
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+        result = _product_store.consume_credit(device_id)
+        if result.get("ok"):
+            _product_store.track(
+                "package_export",
+                device_id=device_id,
+                props={"reason": result.get("reason")},
+            )
+        else:
+            _product_store.track(
+                "package_export_blocked",
+                device_id=device_id,
+                props={"reason": result.get("reason")},
+            )
+        return result
+
     @app.post("/api/v1/charts/{chart_id}/events", response_model=EventResponse)
     async def create_event(chart_id: str, req: EventCreateRequest) -> EventResponse:
-        """Record a life event for a given chart."""
+        """Record a life event for a given chart (UUID or legacy bazi)."""
         if _calibrator is None or _event_store is None:
             raise HTTPException(
                 status_code=503,
                 detail="event calibration subsystem not available",
             )
+        scope_key, _bazi = _resolve_chart_scope(chart_id)
         try:
             from tools.destiny.calibrator import LifeEvent
 
             event = LifeEvent.create(
-                chart_id=chart_id.strip(),
+                chart_id=scope_key,
                 event_type=req.event_type,
                 happened_at=req.happened_at,
                 description=req.description,
@@ -1240,6 +2050,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 status_code=503,
                 detail="event calibration subsystem not available",
             )
+        scope_key, _bazi = _resolve_chart_scope(chart_id)
         return [
             EventResponse(
                 id=e.id,
@@ -1248,8 +2059,22 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 happened_at=e.happened_at,
                 description=e.description,
             )
-            for e in _event_store.list(chart_id.strip())
+            for e in _event_store.list(scope_key)
         ]
+
+    @app.delete("/api/v1/charts/{chart_id}/events/{event_id}")
+    async def delete_event(chart_id: str, event_id: str) -> Dict[str, Any]:
+        """Delete a recorded life event."""
+        if _event_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="event calibration subsystem not available",
+            )
+        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        ok = _event_store.delete(scope_key, event_id.strip())
+        if not ok:
+            raise HTTPException(status_code=404, detail="event not found")
+        return {"deleted": True, "id": event_id}
 
     @app.post("/api/v1/charts/{chart_id}/calibrate", response_model=CalibrationResponse)
     async def calibrate_chart(chart_id: str) -> CalibrationResponse:
@@ -1261,8 +2086,40 @@ def build_app(config: ConfigLoader) -> FastAPI:
             )
         from tools.destiny.contract import ChartInfo
 
-        chart = ChartInfo(bazi=chart_id.strip())
-        result = await _calibrator.calibrate(chart)
+        scope_key, bazi = _resolve_chart_scope(chart_id)
+        chart = ChartInfo(bazi=bazi)
+        result = await _calibrator.calibrate(
+            chart, storage_key=scope_key
+        )
+        return CalibrationResponse(
+            chart_id=scope_key,
+            event_count=result["event_count"],
+            average_score=result["average_score"],
+            system_scores=result["system_scores"],
+            adjusted_weights=result["adjusted_weights"],
+            suggested_hour_offset=result.get("suggested_hour_offset"),
+            events=result.get("events", []),
+            calibration_id=result.get("calibration_id"),
+        )
+
+    @app.get("/api/v1/charts/{chart_id}/calibrate/latest", response_model=CalibrationResponse)
+    async def latest_calibration(chart_id: str) -> CalibrationResponse:
+        """Return the most recently persisted calibration for a chart."""
+        if _event_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="event calibration subsystem not available",
+            )
+        latest_fn = getattr(_event_store, "latest_calibration", None)
+        if not callable(latest_fn):
+            raise HTTPException(
+                status_code=501,
+                detail="event store does not support calibration history",
+            )
+        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        result = latest_fn(scope_key)
+        if not result:
+            raise HTTPException(status_code=404, detail="no calibration found")
         return CalibrationResponse(
             chart_id=result["chart_id"],
             event_count=result["event_count"],
@@ -1271,7 +2128,50 @@ def build_app(config: ConfigLoader) -> FastAPI:
             adjusted_weights=result["adjusted_weights"],
             suggested_hour_offset=result.get("suggested_hour_offset"),
             events=result.get("events", []),
+            calibration_id=result.get("id"),
+            created_at=result.get("created_at"),
         )
+
+    @app.post("/api/v1/bazi/compatibility")
+    async def bazi_compatibility(req: CompatibilityRequest) -> Dict[str, Any]:
+        """双盘合婚结构评分 + 可选共同择日/.ics(零 LLM)。"""
+        try:
+            from tools.bazi_ai.hehun import compare_charts
+        except Exception as exc:  # pragma: no cover
+            raise HTTPException(
+                status_code=503,
+                detail=f"compatibility subsystem not available: {exc}",
+            ) from exc
+
+        from datetime import date as _date
+
+        date_from = None
+        date_to = None
+        try:
+            if req.date_from:
+                date_from = _date.fromisoformat(req.date_from)
+            if req.date_to:
+                date_to = _date.fromisoformat(req.date_to)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"invalid date format: {exc}"
+            ) from exc
+
+        result = compare_charts(
+            req.bazi_a.strip(),
+            req.gender_a,
+            req.bazi_b.strip(),
+            req.gender_b,
+            include_joint_days=req.include_joint_days,
+            include_ics=req.include_ics,
+            event_type=req.event_type,
+            date_from=date_from,
+            date_to=date_to,
+            top_n=req.top_n,
+        )
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
 
     # Serve the bundled frontend web UI under /app; redirect root to it.
     # Prefer the modern React build in web/dist; fall back to the legacy

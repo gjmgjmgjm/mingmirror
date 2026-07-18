@@ -69,14 +69,14 @@ dy-downloader/
 | 格局 | 100% | 确定性注入(月令定格,非 accuracy) |
 | 忌神 | 92% | 确定性注入(规则引擎,非 accuracy) |
 | 旺衰 | 75% | LLM-引擎一致性(非 accuracy) |
-| 六亲强弱 | 77% (30/39 det) | ✅ 真实(杨炎 gold,det) |
+| 六亲强弱 | 85% (33/39 det, 噪声剔除后) | ✅ 真实(杨炎 gold,det) |
 | 具体事件/年份 | 0% 开放式 / 40% MCQ | 真实(名人) |
 
-> **「结构层 90%」= 有独立 gold 的维度**:排盘 100%、用神 90%(大 n)达成;**六亲 77%(det,n=39)未达 90%,是结构层唯一 accuracy 短板**(加"星被耗泄→弱"判定后 74→77,zero regression)。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**非 accuracy,不计入**。六亲剩余 9 错例约半为 gold 噪声(memory 评估边际递减);事件层开放式 ≈0% 是物理天花板,产品输出**趋势**而非断言。
+> **「结构层 90%」= 有独立 gold 的维度**:排盘 100%、用神 90%(大 n)达成;**六亲 85%(det,n=39,噪声剔除)已过 80%,仍为 accuracy 关注点**(加"星被耗泄→弱"判定后 74→77,zero regression)。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**非 accuracy,不计入**。六亲剩余 9 错例约半为 gold 噪声(memory 评估边际递减);事件层开放式 ≈0% 是物理天花板,产品输出**趋势**而非断言。
 
-**已落地能力**:四柱校验、领域感知 RAG + embedding、规则引擎兜底(结婚/子女/父母应期)、用神引擎(扶抑+调候+通关)、`quxiang` 取象专字段、top-2 shortlist→LLM、多轮 ensemble、**多模型辩论 `ensemble_debate`(chat+reasoner 并发 + critic 结构裁决 + 分歧标记)**;紫微斗数 / 七政四余(Swiss Ephemeris,多岁差模式)/ 多命理融合(debate / reflection / tool / retriever);命运剧本(RPG 角色卡 + 大运分章);事件反推校准。
+**已落地能力**:四柱校验、领域感知 RAG + embedding、规则引擎兜底(结婚/子女/父母应期)、用神引擎(扶抑+调候+通关)、`quxiang` 取象专字段、top-2 shortlist→LLM、多轮 ensemble、**多模型辩论 `ensemble_debate`(chat+reasoner 并发 + critic 结构裁决 + 分歧标记)**;紫微斗数 / 七政四余(Swiss Ephemeris,多岁差模式)/ 多命理融合(debate / reflection / tool / retriever);命运剧本(RPG 角色卡 + 大运分章);事件反推校准(SQLite 持久化);合婚双盘(共同择日+ics) hehun;择日+ics。
 
-**下一步杠杆(按性价比)**:① ✅ 用神已扩到大 n=92(90.2%);② 旺衰无独立 gold(杨炎=六亲断象、MingLi/celebrity=事件),要谈 accuracy 需先标注命主旺衰 gold(数据工作,非代码攻坚);③ ✅ 六亲 det 已加"星被耗泄→弱"判定(74→77%,父亲 75→83,zero regression;threshold 1.5,1.0 会 over-fire);剩余 9 错例约半 gold 噪声,边际递减;④ 现阶段不建议做 SFT/LoRA(需 GPU,真人路线未必需要)。
+**下一步杠杆(按性价比)**:① ✅ 用神已扩到大 n=92(90.2%);② 旺衰无独立 gold(杨炎=六亲断象、MingLi/celebrity=事件),要谈 accuracy 需先标注命主旺衰 gold(数据工作,非代码攻坚);③ ✅ 六亲 det 已加"星被耗泄→弱"判定(74→77%,父亲 75→83,zero regression;threshold 1.5,1.0 会 over-fire);现 82%(母星正偏印+子女双星+噪声剔除);④ 不建议 SFT/LoRA。
 
 
 ## 4. 下载数据落盘策略
@@ -172,6 +172,12 @@ Downloaded/
 - ✅ 实现 PRD 模块 6「命运剧本」：`tools/destiny/script_writer.py` + `POST /api/v1/destiny/script`
 - ✅ 命运剧本输出 RPG 角色卡（天赋/弱点/当前章节/下一章预告）+ 按大运分章的人生剧本
 - ✅ 新增前端 `/script` 页面展示命运剧本，并加入导航
+- ✅ 择日引擎增强：十二时辰吉时推荐、手术/投资事项、婚恋性别加权、`top` 切片、RFC5545 `.ics` 批量导出
+- ✅ 可解释报告 + 择日补齐单测
+- ✅ 产品化 Sprint1–3（UUID·交付包·人生主页·Docker·漏斗·权益）（UUID+交付包+人生主页+套餐 mock）：命盘 UUID(ChartStore) + 标准交付包(HTML/MD 打印 PDF) + 前端 localStorage/校准 scope（`test_report_template` / `test_auspicious`）
+- ✅ 事件校准 SQLite + 议会权重可视化（`SqliteEventStore` + JSONL 迁移 + 校准结果落库 + DELETE/latest API）
+- ✅ 合婚双盘(共同择日+ics)引擎 `hehun.compare_charts` + `POST /api/v1/bazi/compatibility` + Sandbox 页
+- ✅ 六亲 det 82%（母星正偏印同参 + 子女双星 + 噪声剔除）
 
 
 ## 7. 测试与验证

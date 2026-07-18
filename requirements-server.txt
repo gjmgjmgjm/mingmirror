@@ -1,0 +1,6 @@
+# REST server + calendar (命镜 product)
+fastapi>=0.100
+uvicorn>=0.23
+pydantic>=2.0
+sxtwl>=2.0
+httpx>=0.25

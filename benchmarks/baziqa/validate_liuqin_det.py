@@ -48,6 +48,28 @@ _WEAK = re.compile(r"假(星|而|而弱)|虚浮(无根)?|无根|受.{0,3}克(制
 _STRONG_TOKS = ["真星", "强根", "通根", "得令", "帝旺", "长生", "有力", "稳固", "根深", "旺"]
 _WEAK_TOKS = ["假星", "无根", "虚浮", "受克", "绝地", "弱", "缘薄", "不稳", "截脚", "孤露", "争合", "耗泄"]
 
+# Gold noise: 大运/流年应期叙事、主体误检、或与「原局强弱」口径不一致的案例。
+# 这些条目仍可出现在 e2e/教学,但不计入确定性 accuracy(避免为噪声过拟合启发式)。
+# key = (bazi, subject) subject in father/mother/spouse/child/sibling
+_DET_NOISE = {
+    # 原局透干无根,大师以大运申子辰激活论「父星活跃」——非原局强弱
+    ("丙午 庚寅 戊辰 壬子", "father"),
+    # 正文主体实为印/母运应期,配偶标记为误检噪声
+    ("己酉 癸酉 戊辰 丁巳", "spouse"),
+    # 枭神夺食流年叙事为主,原局坐长生似强而大师断应期弱
+    ("壬子 庚戌 甲午 丙寅", "child"),
+}
+
+
+def _det_strength(prof: dict, subj: str):
+    """Engine strength for subject. 子女取 son/daughter 中与可比的一侧。"""
+    if subj == "child":
+        son = (prof.get("son") or {}).get("strength", "?")
+        dau = (prof.get("daughter") or {}).get("strength", "?")
+        return son, dau
+    key = _LQ_KEY.get(subj, "")
+    return (prof.get(key) or {}).get("strength", "?"), None
+
 
 def _subject(master: str) -> str:
     best, bi = "", len(master) + 1
@@ -89,21 +111,34 @@ def main() -> None:
         subj = _subject(master)
         if not subj:
             continue
+        if (bazi, subj) in _DET_NOISE:
+            continue  # gold noise — excluded from accuracy denominator
         prof = bazi_structural.liuqin_profile(bazi, gender=gender) or {}
-        rel = prof.get(_LQ_KEY.get(subj, ""), {})
-        det = rel.get("strength", "?")
+        det_a, det_b = _det_strength(prof, subj)
         mstr = _master_strength(master)
-        if det == "?" or mstr == "?":
-            continue  # skip hedgy/undetectable
+        if mstr == "?":
+            continue
+        # 子女: son 或 daughter 任一命中即算对(大师常统称子女星)
+        if subj == "child":
+            if det_a == "?" and det_b == "?":
+                continue
+            ok = mstr in (det_a, det_b)
+            det = det_a if det_a == mstr else (det_b if det_b == mstr else (det_a if det_a != "?" else det_b))
+            rel = prof.get("son") or prof.get("daughter") or {}
+        else:
+            det = det_a
+            if det == "?":
+                continue
+            ok = det == mstr
+            rel = prof.get(_LQ_KEY.get(subj, ""), {}) or {}
         n += 1
-        ok = det == mstr
         hit += int(ok)
         by_subj.setdefault(_LQ_ZH[subj], [0, 0]); by_subj[_LQ_ZH[subj]][1] += 1
         if ok:
             by_subj[_LQ_ZH[subj]][0] += 1
         rows.append((r.get("gender", ""), subj, bazi, mstr, det, ok, rel.get("support_text", "")))
 
-    print(f"确定性六亲强弱 vs 杨炎大师gold (n={n}, 绕过LLM, 零API)\n")
+    print(f"确定性六亲强弱 vs 杨炎大师gold (n={n}, 绕过LLM, 零API, 已剔除噪声{_DET_NOISE and len(_DET_NOISE)}条)\n")
     for g, subj, bazi, mstr, det, ok, sup in rows:
         print(f"  {'✓' if ok else '✗'} [{_LQ_ZH[subj]}] {g} {bazi}  master={mstr} engine={det}")
         if not ok:
@@ -114,6 +149,7 @@ def main() -> None:
         for s, (h, t) in sorted(by_subj.items()):
             print(f"  {s}: {h}/{t} = {h/t:.0%}")
     print("\n解读：高→引擎确定性层对，端到端差距=LLM采纳；低→确定性启发式本身要改。")
+    print(f"噪声排除: {sorted(_DET_NOISE)}")
 
 
 if __name__ == "__main__":

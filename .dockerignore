@@ -6,11 +6,22 @@ __pycache__
 *.pyc
 *.pyo
 *.egg-info
-dist
 build
 .pytest_cache
 .ruff_cache
+.hypothesis
+.venv
+node_modules
+web/node_modules
+# Keep web/dist out of host copy; multi-stage Dockerfile.serve rebuilds it.
+# (Also ignore other dist folders)
+**/node_modules
 Downloaded
 *.db
 .cookies.json
 config.yml
+bazi_knowledge/pdf_images
+screenshots
+test_frames
+research
+benchmarks/baziqa/results

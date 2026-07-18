@@ -82,6 +82,7 @@ class MultiDestinyAnalyzer:
         callables: Optional[Dict[str, SystemCallable]] = None,
         config: Optional[Dict[str, Any]] = None,
         strategy: str = "single",
+        system_weights: Optional[Dict[str, float]] = None,
     ):
         self.systems = list(systems or ["bazi", "ziwei", "qizheng"])
         self.callables = dict(callables or _load_default_callables())
@@ -89,6 +90,13 @@ class MultiDestinyAnalyzer:
         self.strategy = strategy if strategy in (
             "single", "reflection", "debate", "tool_augmented"
         ) else "single"
+        # Optional per-system fusion weights (e.g. from event calibration).
+        # Missing keys default to 1.0 inside resolve_domain.
+        self.system_weights: Dict[str, float] = {
+            str(k): float(v)
+            for k, v in (system_weights or {}).items()
+            if v is not None
+        }
 
     def _get_callable(self, system: str) -> Optional[SystemCallable]:
         if system in self.callables:
@@ -210,6 +218,9 @@ class MultiDestinyAnalyzer:
         }
         if self.strategy != "single":
             result["strategy"] = self.strategy
+        if self.system_weights:
+            result["system_weights"] = dict(self.system_weights)
+            result["weights_source"] = "calibration"
         return result
 
     async def _run_with_error_handling(
@@ -232,11 +243,17 @@ class MultiDestinyAnalyzer:
         by_domain: Dict[str, List[DomainConclusion]] = {domain: [] for domain in _DOMAINS}
         for result in system_results:
             for conclusion in result.domain_conclusions:
+                # Ensure system id is present for weighted voting.
+                if not conclusion.system:
+                    conclusion.system = result.system
                 by_domain.setdefault(conclusion.domain, []).append(conclusion)
 
+        weights = self.system_weights or None
         aligned: Dict[str, Any] = {}
         for domain in _DOMAINS:
-            aligned[domain] = resolve_domain(domain, by_domain[domain])
+            aligned[domain] = resolve_domain(
+                domain, by_domain[domain], system_weights=weights
+            )
         return aligned
 
     def _build_summary(

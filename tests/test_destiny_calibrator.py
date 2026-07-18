@@ -5,7 +5,9 @@ import pytest
 from tools.destiny.calibrator import (
     DestinyCalibrator,
     InMemoryEventStore,
+    JsonlEventStore,
     LifeEvent,
+    SqliteEventStore,
     _extract_year,
     _score_text,
     _suggest_hour_offset,
@@ -63,6 +65,63 @@ class TestInMemoryEventStore:
     def test_delete_missing(self):
         store = InMemoryEventStore()
         assert store.delete("庚午 辛巳 庚辰 壬午", "missing") is False
+
+
+class TestSqliteEventStore:
+    def test_persist_across_instances(self, tmp_path):
+        db = tmp_path / "events.db"
+        store = SqliteEventStore(db)
+        event = LifeEvent.create(
+            chart_id="庚午 辛巳 庚辰 壬午",
+            event_type="marriage",
+            happened_at="2020-05-20",
+            description="结婚",
+        )
+        store.add(event)
+        store.close()
+
+        store2 = SqliteEventStore(db)
+        events = store2.list("庚午 辛巳 庚辰 壬午")
+        assert len(events) == 1
+        assert events[0].description == "结婚"
+        assert store2.delete("庚午 辛巳 庚辰 壬午", event.id) is True
+        assert store2.list("庚午 辛巳 庚辰 壬午") == []
+        store2.close()
+
+    def test_migrate_from_jsonl(self, tmp_path):
+        jsonl = tmp_path / "events.jsonl"
+        jstore = JsonlEventStore(jsonl)
+        ev = LifeEvent.create(
+            chart_id="甲子 乙丑 丙寅 丁卯",
+            event_type="job",
+            happened_at="2019-01-01",
+        )
+        jstore.add(ev)
+
+        db = tmp_path / "events.db"
+        store = SqliteEventStore(db, migrate_from_jsonl=jsonl)
+        assert len(store.list("甲子 乙丑 丙寅 丁卯")) == 1
+        store.close()
+
+    def test_save_and_latest_calibration(self, tmp_path):
+        store = SqliteEventStore(tmp_path / "c.db")
+        payload = {
+            "chart_id": "庚午 辛巳 庚辰 壬午",
+            "event_count": 2,
+            "average_score": 0.7,
+            "system_scores": {"bazi": 0.8},
+            "adjusted_weights": {"bazi": 1.0},
+            "suggested_hour_offset": None,
+            "events": [],
+        }
+        rid = store.save_calibration(payload)
+        assert rid
+        latest = store.latest_calibration("庚午 辛巳 庚辰 壬午")
+        assert latest is not None
+        assert latest["average_score"] == 0.7
+        assert latest["system_scores"]["bazi"] == 0.8
+        assert store.latest_calibration("nope") is None
+        store.close()
 
 
 class TestHelpers:

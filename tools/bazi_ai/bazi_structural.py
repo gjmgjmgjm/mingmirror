@@ -695,16 +695,23 @@ def _find_shishen_locations(day_master: str, pillars: List[str]) -> List[Dict]:
             "type": "天干",
             "char": stem,
         })
-        # branch main qi
-        ss_br = shishen_for_branch_main(day_master, branch)
-        locations.setdefault(ss_br, []).append({
-            "pillar": pillar,
-            "position": _BRANCH_LABELS[idx],
-            "type": "地支本气",
-            "char": branch,
-        })
-        # hidden stems
-        for hidden in _BRANCH_HIDDEN_STEMS.get(branch, []):
+        # branch main qi — use 本气天干's precise 十神 (正印/偏印…), NOT the
+        # coarse shishen_for_branch_main bucket ("印"/"财"/"官杀"). The coarse
+        # keys never match liuqin_profile lookups (mother→正印), so 月支本气
+        # was historically dropped and only 藏干 remained → systematic under-count.
+        main_stems = _BRANCH_HIDDEN_STEMS.get(branch, [])
+        if main_stems:
+            main_stem = main_stems[0]
+            ss_br = shishen_for_stem(day_master, main_stem)
+            locations.setdefault(ss_br, []).append({
+                "pillar": pillar,
+                "position": _BRANCH_LABELS[idx],
+                "type": "地支本气",
+                "char": main_stem,
+            })
+        # hidden stems (skip the 本气 stem already recorded above to avoid
+        # double-counting the same char as both 本气 and 藏干)
+        for hidden in main_stems[1:]:
             ss_h = shishen_for_stem(day_master, hidden)
             locations.setdefault(ss_h, []).append({
                 "pillar": pillar,
@@ -712,6 +719,8 @@ def _find_shishen_locations(day_master: str, pillars: List[str]) -> List[Dict]:
                 "type": "地支藏干",
                 "char": hidden,
             })
+        # single-qi branches (子/卯/酉) only have 本气 — already recorded.
+        # Branches whose list was empty fall through with no root (shouldn't happen).
     return locations
 
 
@@ -763,7 +772,8 @@ def _resolved_clash_pairs(dz_comp: dict) -> set:
 
 
 def _root_destroyed_at(pos: str, star_el: str, dz_comp: dict,
-                       resolved_clash: set = None) -> str:
+                       resolved_clash: set = None,
+                       shishen: str = "") -> str:
     """Reason the root at branch *pos* is spoiled, or ''.
 
     六冲 shakes the root — but ONLY if the clash is not neutralized (冲被合解);
@@ -782,6 +792,14 @@ def _root_destroyed_at(pos: str, star_el: str, dz_comp: dict,
             poses = [t for t in tup if t in _LQ_POSITIONS]
             hua = tup[-1] if tup and tup[-1] in _LQ_ELEMENTS else ""
             if pos in poses and hua and hua != star_el:
+                # 印星月令合而不化: 三合/三会半合不破当令印根(母星常见);
+                # 不推广到财官,避免配偶 over-promotion.
+                if (
+                    pos == "月支"
+                    and key in ("三合", "三会")
+                    and shishen in ("正印", "偏印")
+                ):
+                    continue
                 return f"合化{hua}"
     return ""
 
@@ -864,8 +882,10 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         star_el = _star_element(day_master, shishen)
         dz_comp = profile.get("di_zhi_comprehensive", {})
         resolved_clash = _resolved_clash_pairs(dz_comp)
-        destroyed = [(rp, _root_destroyed_at(rp, star_el, dz_comp, resolved_clash))
-                     for rp in root_positions]
+        destroyed = [
+            (rp, _root_destroyed_at(rp, star_el, dz_comp, resolved_clash, shishen))
+            for rp in root_positions
+        ]
         destroyed = [(rp, r) for rp, r in destroyed if r]
         destroyed_set = {rp for rp, _ in destroyed}
         intact_roots = [rp for rp in root_positions if rp not in destroyed_set]
@@ -921,11 +941,44 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
             "description": f"{relation}以{shishen}为星：" + "；".join(lines) + f"。整体{support_text}（{strength}）。",
         }
 
+    # 母亲:正印为主,偏印同参(杨炎常以「印星」统称母星;仅正印会漏月支偏印本气)
+    mother_zh = _describe("母亲", mapping["mother"])
+    mother_pian_star = "偏印" if mapping["mother"] == "正印" else "正印"
+    mother_pian = _describe("母亲", mother_pian_star)
+    mother_merged = dict(mother_zh or {})
+    if mother_pian and mother_pian.get("exists"):
+        if not mother_merged.get("exists"):
+            mother_merged = dict(mother_pian)
+            mother_merged["star"] = f"{mapping['mother']}/{mother_pian_star}"
+        else:
+            # 任一印星为强 → 母星强; 合并 locations
+            if mother_pian.get("strength") == "强":
+                mother_merged["strength"] = "强"
+            locs = list(mother_merged.get("locations") or [])
+            seen = {
+                (item.get("position"), item.get("char"), item.get("type"))
+                for item in locs
+            }
+            for loc in mother_pian.get("locations") or []:
+                key = (loc.get("position"), loc.get("char"), loc.get("type"))
+                if key not in seen:
+                    locs.append(loc)
+                    seen.add(key)
+            mother_merged["locations"] = locs
+            if mother_pian.get("strength") == "强" and mother_zh.get("strength") != "强":
+                mother_merged["support_text"] = (
+                    f"{mother_zh.get('support_text', '')};偏印同参:{mother_pian.get('support_text', '')}"
+                ).strip("; ")
+                mother_merged["description"] = (
+                    f"{mother_zh.get('description', '')} "
+                    f"偏印同参亦{mother_pian.get('strength', '')}。"
+                ).strip()
+
     result: Dict[str, Any] = {
         "gender": gender_key,
         "day_master": day_master,
         "father": _describe("父亲", mapping["father"]),
-        "mother": _describe("母亲", mapping["mother"]),
+        "mother": mother_merged,
         "spouse": _describe("配偶", mapping["spouse"]),
         "son": _describe("儿子", mapping["son"]),
         "daughter": _describe("女儿", mapping["daughter"]),

@@ -1,0 +1,41 @@
+# MingMirror one-shot product stack
+#
+#   docker compose up --build
+#   open http://localhost:8000/app/
+#
+# Data (charts, events, analytics, entitlements) lives in the volume.
+
+services:
+  mingmirror:
+    build:
+      context: .
+      dockerfile: Dockerfile.serve
+    image: mingmirror:latest
+    container_name: mingmirror
+    ports:
+      - "8000:8000"
+    environment:
+      # Demo activation code for /pricing → full plan
+      MINGMIRROR_DEMO_CODE: ${MINGMIRROR_DEMO_CODE:-demo-pro}
+      # Admin board + payment webhook (set in production!)
+      MINGMIRROR_ADMIN_TOKEN: ${MINGMIRROR_ADMIN_TOKEN:-}
+      MINGMIRROR_WEBHOOK_SECRET: ${MINGMIRROR_WEBHOOK_SECRET:-}
+      # Optional LLM keys for AI chapters (structure layer works without)
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DOUYIN_PATH: /app/Downloaded
+    volumes:
+      - mingmirror_data:/app/Downloaded
+      - mingmirror_db:/app/data
+    # Put SQLite product DB under /app/data via config override file if needed.
+    # Default store path is {path}/mingmirror_events.db under DOUYIN_PATH.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  mingmirror_data:
+  mingmirror_db:

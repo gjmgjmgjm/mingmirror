@@ -72,6 +72,42 @@ def test_ensemble_returns_all_systems(mock_analyzer):
     assert systems == {"bazi", "ziwei", "qizheng"}
 
 
+def test_weighted_fusion_prefers_high_weight_system():
+    """Calibration weights should tip consensus when texts disagree."""
+
+    async def bazi_caller(chart: ChartInfo, question: str):
+        return {
+            "domain_analysis": {"career": "八字说升职"},
+            "confidence": "medium",
+        }
+
+    async def qizheng_caller(chart: ChartInfo, question: str):
+        return {
+            "domain_analysis": {"career": "七政说平稳"},
+            "confidence": "medium",
+        }
+
+    analyzer = MultiDestinyAnalyzer(
+        systems=["bazi", "qizheng"],
+        callables={"bazi": bazi_caller, "qizheng": qizheng_caller},
+        system_weights={"bazi": 0.8, "qizheng": 0.2},
+    )
+    result = _run(analyzer.analyze(ChartInfo(bazi="甲子 丙寅 戊辰 庚午")))
+    assert result["aligned"]["career"]["consensus"] == "八字说升职"
+    assert result["system_weights"]["bazi"] == 0.8
+    assert result["weights_source"] == "calibration"
+    assert result["aligned"]["career"].get("weight_share", 0) >= 0.7
+
+    # Flip weights → consensus flips
+    analyzer2 = MultiDestinyAnalyzer(
+        systems=["bazi", "qizheng"],
+        callables={"bazi": bazi_caller, "qizheng": qizheng_caller},
+        system_weights={"bazi": 0.2, "qizheng": 0.8},
+    )
+    result2 = _run(analyzer2.analyze(ChartInfo(bazi="甲子 丙寅 戊辰 庚午")))
+    assert result2["aligned"]["career"]["consensus"] == "七政说平稳"
+
+
 def test_ensemble_high_confidence_on_full_agreement():
     async def same_caller(chart: ChartInfo, question: str):
         return {

@@ -34,6 +34,7 @@ from tools.bazi_ai.bazi_structural import (
     shishen_for_stem,
     structural_profile,
 )
+from tools.bazi_ai.shensha import shensha_profile
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -201,6 +202,43 @@ def _section_liuqin(liuqin: Dict[str, Any]) -> Tuple[str, str]:
         "「星」看十神落柱,「宫」看地支位置,二者同参。"
     )
     return ("六亲缘分　`✅ 确定性 · 星宫同参`", "\n".join(body_lines))
+
+
+_SHENSHA_FOOTER = (
+    "> 神煞由确定性查表计算(主流子平口径):禄/羊刃显式表(羊刃取阴干阳刃后一支)、"
+    "学堂词馆纳音五行长生、三合系星年支+日支双查、天乙贵人年干+日干双查。"
+    "存在性非此即彼、无流派模糊;星曜释义为趋势参考,非断言。"
+)
+
+
+def _section_shensha(shensha: Dict[str, Any]) -> Tuple[str, str]:
+    """神煞(确定性查表)。吉神/平星/凶神分组,落柱 + 释义。"""
+    present = [s for s in (shensha.get("stars") or []) if s.get("present")]
+    if not present:
+        body = "命局未见显著入命神煞。\n\n" + _SHENSHA_FOOTER
+        return ("神煞　`✅ 确定性 · 查表`", body)
+
+    groups: Dict[str, List[Dict[str, Any]]] = {"吉神": [], "平星": [], "凶神": []}
+    for s in present:
+        groups.setdefault(s.get("category", "平星"), []).append(s)
+
+    lines: List[str] = []
+    for cat in ("吉神", "平星", "凶神"):
+        rows = groups.get(cat, [])
+        if not rows:
+            continue
+        lines.append(f"**{cat}**")
+        lines.append("| 神煞 | 落柱 | 释义 |")
+        lines.append("|------|------|------|")
+        for s in rows:
+            locs = "、".join(
+                f"{l.get('pillar', '')}{l.get('position', '')}{l.get('char', '')}"
+                for l in s.get("locations", [])
+            ) or "—"
+            lines.append(f"| {s['name']} | {locs} | {s.get('description', '')} |")
+        lines.append("")
+    lines.append(_SHENSHA_FOOTER)
+    return ("神煞　`✅ 确定性 · 查表`", "\n".join(lines))
 
 
 def _section_structure_detail(structural: Dict[str, Any]) -> Tuple[str, str]:
@@ -377,6 +415,9 @@ def render_report(
         sections.append(qx)
     if liuqin:
         sections.append(_section_liuqin(liuqin))
+    shensha = shensha_profile(bazi, gender=gender) or {}
+    if shensha:
+        sections.append(_section_shensha(shensha))
     sections.append(_section_structure_detail(structural))
     life = _section_life(result)
     if life:
@@ -535,6 +576,25 @@ def build_report(
                     "liuqin_analysis": _safe(result.get("liuqin_analysis")),
                 },
             })
+
+    # 神煞(确定性查表,吉神/平星/凶神)
+    shensha = shensha_profile(bazi, gender=gender) or {}
+    present_stars = [s for s in (shensha.get("stars") or []) if s.get("present")]
+    sections.append({
+        "id": "shensha", "title": "神煞", "trust": "certain",
+        "data": {
+            "members": [
+                {"name": s["name"], "category": s.get("category", "平星"),
+                 "tier": s.get("tier", "secondary"), "rule": s.get("rule", ""),
+                 "locations": s.get("locations", []),
+                 "description": s.get("description", "")}
+                for s in present_stars
+            ],
+            "by_pillar": shensha.get("by_pillar", {}),
+            "counts": (shensha.get("summary") or {}).get("counts", {}),
+            "summary_text": shensha.get("summary_text", ""),
+        },
+    })
 
     # 4 取象(AI,条件)
     qx = result.get("quxiang")

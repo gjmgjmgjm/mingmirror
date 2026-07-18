@@ -1,0 +1,40 @@
+# MingMirror product image: FastAPI + prebuilt React SPA
+# Multi-stage: build web, then slim Python runtime.
+
+# ---- frontend build ----
+FROM node:20-alpine AS web-build
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+COPY web/ ./
+RUN npm run build
+
+# ---- python runtime ----
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-server.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-server.txt
+
+COPY . .
+# Overlay SPA build from node stage
+COPY --from=web-build /web/dist /app/web/dist
+
+RUN mkdir -p /app/Downloaded /app/data
+
+ENV DOUYIN_PATH=/app/Downloaded
+ENV MINGMIRROR_DEMO_CODE=demo-pro
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+VOLUME ["/app/Downloaded", "/app/data"]
+
+# Serve on 0.0.0.0 for container networking
+ENTRYPOINT ["python", "run.py"]
+CMD ["--serve", "--serve-host", "0.0.0.0", "--serve-port", "8000", "-c", "config.example.yml"]

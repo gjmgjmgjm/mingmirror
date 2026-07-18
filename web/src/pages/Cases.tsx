@@ -30,7 +30,7 @@ function extractTags(item: BaziCase): string[] {
 }
 
 export default function Cases() {
-  const { setChart } = useChart();
+  const { persistChart } = useChart();
   const [cases, setCases] = useState<BaziCase[]>([]);
   const [filtered, setFiltered] = useState<BaziCase[]>([]);
   const [loading, setLoading] = useState(false);
@@ -74,9 +74,9 @@ export default function Cases() {
   }, [search, activeTag, cases]);
 
   const handleUseCase = (bazi: string) => {
-    setChart({
+    void persistChart({
       bazi,
-      gender: "",
+      gender: "male",
       birthDate: "",
       birthTime: "",
     });

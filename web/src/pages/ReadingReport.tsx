@@ -1,7 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Download, FileText, Printer } from "lucide-react";
 import { useChart } from "../contexts/ChartContext";
-import { fetchBaziReport, type ReportData, type ReportSection } from "../api/client";
+import {
+  fetchBaziReport,
+  exportChartPackage,
+  exportBaziPackage,
+  downloadTextFile,
+  openHtmlPrint,
+  type ReportData,
+  type ReportSection,
+} from "../api/client";
+import {
+  canExportFullPackage,
+  consumePackageCreditAsync,
+  getEntitlement,
+} from "../lib/entitlements";
+import { track } from "../lib/analytics";
 import { ELEMENT_META, type Element } from "../lib/bazi";
 import ChartLoader from "../components/ChartLoader";
 import PillarsChart from "../components/PillarsChart";
@@ -20,8 +35,16 @@ const CN_NUM = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "
 const BORDER_BY_ID: Record<string, "vermilion" | "gold" | "jade" | "ink"> = {
   chart: "gold",
   yongshen: "jade",
+  shensha: "vermilion",
   dayun: "gold",
   summary: "jade",
+};
+
+// 神煞分类配色(全字面量,避免 Tailwind purge 动态类)
+const SHENSHA_CAT_STYLE: Record<string, { chip: string; tile: string; text: string }> = {
+  "吉神": { chip: "bg-jade/10 text-jade", tile: "border-jade/30 bg-jade/5", text: "text-jade" },
+  "平星": { chip: "bg-gold/10 text-gold", tile: "border-gold/30 bg-gold/5", text: "text-gold" },
+  "凶神": { chip: "bg-vermilion/10 text-vermilion", tile: "border-vermilion/30 bg-vermilion/5", text: "text-vermilion" },
 };
 
 const ELEMENT_KEY: Record<string, Element> = {
@@ -91,7 +114,15 @@ function ElementsBlock({ elements }: { elements: ElementItem[] }) {
 // 章节正文(按 section.id 渲染,消费 section.data)
 // ---------------------------------------------------------------------------
 
-function SectionBody({ section, bazi }: { section: ReportSection; bazi: string }) {
+function SectionBody({
+  section,
+  bazi,
+  shenshaByPillar,
+}: {
+  section: ReportSection;
+  bazi: string;
+  shenshaByPillar?: Record<string, string[]>;
+}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const d: Record<string, any> = section.data ?? {};
 
@@ -99,7 +130,7 @@ function SectionBody({ section, bazi }: { section: ReportSection; bazi: string }
     case "chart":
       return (
         <>
-          <PillarsChart bazi={bazi} />
+          <PillarsChart bazi={bazi} shenshaByPillar={shenshaByPillar} />
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <InfoCard label="日主" value={d.day_master || "—"} term="日主" />
             <InfoCard label="格局" value={d.geju || "—"} term="格局" />
@@ -175,6 +206,67 @@ function SectionBody({ section, bazi }: { section: ReportSection; bazi: string }
           )}
         </>
       );
+
+    case "shensha": {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const members: any[] = Array.isArray(d.members) ? d.members : [];
+      const counts: Record<string, number> = d.counts || {};
+      if (!members.length) {
+        return (
+          <p className="text-sm text-ink-400">命局未见显著入命神煞。</p>
+        );
+      }
+      const cats = ["吉神", "平星", "凶神"] as const;
+      return (
+        <>
+          <div className="mb-4 flex flex-wrap gap-2 text-xs">
+            {cats.map((cat) => (
+              <span key={cat} className={`rounded-full px-2 py-0.5 ${SHENSHA_CAT_STYLE[cat].chip}`}>
+                {cat} {counts[cat] || 0}
+              </span>
+            ))}
+          </div>
+          {cats.map((cat) => {
+            const rows = members.filter((m) => m.category === cat);
+            if (!rows.length) return null;
+            const style = SHENSHA_CAT_STYLE[cat];
+            return (
+              <div key={cat} className="mb-4">
+                <div className={`mb-2 text-xs font-medium ${style.text}`}>{cat}</div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {rows.map(
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (m: any, i: number) => (
+                      <div key={`${m.name}-${i}`} className={`rounded-lg border p-2.5 ${style.tile}`}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className={`text-sm font-semibold ${style.text}`}>{m.name}</span>
+                          <span className="shrink-0 text-[10px] text-ink-400">
+                            {Array.isArray(m.locations) && m.locations.length > 0
+                              ? m.locations
+                                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                  .map((l: any) => `${l.pillar}${l.char}`)
+                                  .join("、")
+                              : "—"}
+                          </span>
+                        </div>
+                        {m.description && (
+                          <p className="mt-1 text-[11px] leading-snug text-ink-500 dark:text-ink-400">
+                            {m.description}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {d.summary_text && (
+            <p className="mt-2 text-xs leading-relaxed text-ink-400">{d.summary_text}</p>
+          )}
+        </>
+      );
+    }
 
     case "quxiang": {
       const items: Array<[string, string]> = [
@@ -345,10 +437,64 @@ function SectionBody({ section, bazi }: { section: ReportSection; bazi: string }
 // ---------------------------------------------------------------------------
 
 export default function ReadingReport() {
-  const { chart } = useChart();
+  const { chart, chartScopeId } = useChart();
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportStartYear, setExportStartYear] = useState(
+    () => new Date().getFullYear()
+  );
+  const [exportYears, setExportYears] = useState<5 | 10 | 15 | 20>(10);
+
+  const handleExport = async (mode: "md" | "print") => {
+    if (!chart) return;
+    // Full package (print/PDF) gated by entitlement; markdown free for structure share.
+    if (mode === "print" && !canExportFullPackage()) {
+      setError("完整交付包需开通套餐或购买次数，请前往「套餐」页（演示可一键开通）。");
+      return;
+    }
+    if (mode === "print") {
+      const ok = await consumePackageCreditAsync();
+      if (!ok && getEntitlement().plan !== "pro") {
+        setError("交付包次数已用尽。");
+        return;
+      }
+    }
+    setExporting(true);
+    setError(null);
+    try {
+      const rangeOpts = {
+        liunian_start_year: exportStartYear,
+        liunian_years: exportYears,
+      };
+      const pkg =
+        chart.id || (chartScopeId && chartScopeId.includes("-"))
+          ? await exportChartPackage(chart.id || chartScopeId!, rangeOpts)
+          : await exportBaziPackage({
+              bazi: chart.bazi,
+              gender: chart.gender || "male",
+              birth_date: chart.birthDate || "",
+              birth_time: chart.birthTime || "",
+              calendar_type: chart.calendarType || "solar",
+              label: chart.bazi,
+              ...rangeOpts,
+            });
+      if (mode === "md") {
+        downloadTextFile(
+          pkg.markdown,
+          `${pkg.filename_stem}.md`,
+          "text/markdown"
+        );
+      } else {
+        openHtmlPrint(pkg.html);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!chart) return;
@@ -356,6 +502,7 @@ export default function ReadingReport() {
     setLoading(true);
     setError(null);
     setReport(null);
+    track("report_viewed", {}, chart.id || chart.bazi);
 
     (async () => {
       try {
@@ -394,6 +541,9 @@ export default function ReadingReport() {
   }
 
   const sections = report?.sections ?? [];
+  // 神煞 section 的每柱索引 → 传给 chart section 的 PillarsChart 显示每柱 chips
+  const shenshaByPillar = (sections.find((s) => s.id === "shensha")?.data?.by_pillar ??
+    undefined) as Record<string, string[]> | undefined;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -421,6 +571,66 @@ export default function ReadingReport() {
             <p className="mt-2 text-[11px] text-ink-400">
               本报告不构成医疗 / 法律 / 投资建议。
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="text-[11px] text-ink-500">
+                流年起
+                <input
+                  type="number"
+                  className="input ml-1 w-20 py-0.5 text-xs"
+                  value={exportStartYear}
+                  min={1900}
+                  max={2100}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isNaN(v)) setExportStartYear(v);
+                  }}
+                />
+              </label>
+              <label className="text-[11px] text-ink-500">
+                跨度
+                <select
+                  className="input ml-1 w-16 py-0.5 text-xs"
+                  value={exportYears}
+                  onChange={(e) =>
+                    setExportYears(Number(e.target.value) as 5 | 10 | 15 | 20)
+                  }
+                >
+                  {[5, 10, 15, 20].map((n) => (
+                    <option key={n} value={n}>
+                      {n}年
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => handleExport("print")}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-vermilion/15 px-3 py-1.5 text-xs font-medium text-vermilion transition hover:bg-vermilion/25 disabled:opacity-50"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                {exporting ? "准备中…" : "打印 / 另存 PDF"}
+              </button>
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => handleExport("md")}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-ink-100 px-3 py-1.5 text-xs font-medium text-ink-600 transition hover:bg-ink-200 dark:bg-ink-800 dark:text-ink-300 disabled:opacity-50"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                下载 Markdown
+              </button>
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => handleExport("print")}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gold/15 px-3 py-1.5 text-xs font-medium text-gold transition hover:bg-gold/25 disabled:opacity-50"
+                title="含命书 + 近 60 日择日精选 + 流年附录（今年高亮）"
+              >
+                <Download className="h-3.5 w-3.5" />
+                标准交付包
+              </button>
+            </div>
           </div>
         </div>
       </SectionCard>
@@ -448,7 +658,7 @@ export default function ReadingReport() {
               borderLeft={BORDER_BY_ID[s.id]}
               delay={i * 80}
             >
-              <SectionBody section={s} bazi={report.meta.bazi} />
+              <SectionBody section={s} bazi={report.meta.bazi} shenshaByPillar={shenshaByPillar} />
             </SectionCard>
           ))}
 

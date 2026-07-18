@@ -136,24 +136,60 @@ def _build_mock_result(
     else:
         domain_analysis = dict(domain_texts)
 
+    # Prefer structural profile for life/body palace (deterministic).
+    life = (profile or {}).get("life_palace") or "未知"
+    body = (profile or {}).get("body_palace") or "未知"
+    body_lord = (profile or {}).get("body_lord") or ""
+    fep = (profile or {}).get("five_element_pattern") or ""
+    palaces = (profile or {}).get("twelve_palaces") or {}
+    dominant = []
+    if body_lord:
+        dominant.append(body_lord)
+    if fep:
+        dominant.append(str(fep))
+
+    # Enrich domain texts with palace anchors when available
+    if profile:
+        domain_analysis = {
+            "career": f"命宫在{life}，身主{body_lord or '—'}。" + domain_texts["career"],
+            "wealth": f"财帛相关宜参十二宫布局（命{life}/身{body}）。" + domain_texts["wealth"],
+            "marriage": f"夫妻宫位随命宫逆布；命{life}。" + domain_texts["marriage"],
+            "health": f"疾厄宜结合身宫{body}与五行局{fep or '—'}。" + domain_texts["health"],
+        }
+
     result: Dict[str, Any] = {
         "basic_info": {
             "chart": chart,
-            "day_master": day_master,
-            "life_palace": "待模型分析",
-            "body_palace": "待模型分析",
-            "dominant_stars": [],
+            "day_master": day_master or (profile or {}).get("day_master") or "",
+            "life_palace": life,
+            "body_palace": body,
+            "body_lord": body_lord,
+            "five_element_pattern": fep,
+            "dominant_stars": dominant,
+            "twelve_palaces": palaces,
+            "nayin": (profile or {}).get("nayin") or "",
+            "trust": "certain_structure",
         },
         "reasoning": (
-            "当前未配置 DEEPSEEK_API_KEY，仅返回七政四余基础结构与 RAG 检索信息。"
-            "设置环境变量后可获得完整模型分析。"
+            "结构层已排出命宫/身宫/身主/五行局/十二宫（确定性）。"
+            "当前未配置 DEEPSEEK_API_KEY，领域断语为结构提示+默认模板；"
+            "设置环境变量后可叠加完整模型分析。"
         ),
         "domain_analysis": domain_analysis,
-        "summary": [f"参考相似案例：{', '.join(refs)}" if refs else "未找到相似案例"],
-        "confidence": "low",
-        "caveats": ["未调用真实模型", "请配置 DEEPSEEK_API_KEY"],
+        "summary": [
+            f"命宫{life} · 身宫{body} · 身主{body_lord or '—'} · {fep or '五行局待定'}",
+            f"参考相似案例：{', '.join(refs)}" if refs else "未找到相似案例",
+        ],
+        "confidence": "medium",
+        "caveats": [
+            "结构层 certain_structure",
+            "领域文案含模板成分",
+            "配置 DEEPSEEK_API_KEY 可叠加 LLM 细批",
+        ],
         "_mock": True,
+        "structural": profile or {},
     }
+    _merge_structural_profile(result, profile)
     if profile and profile.get("astro"):
         result["astro_profile"] = profile["astro"]
         result["aspects"] = profile.get("aspects", [])
@@ -422,6 +458,58 @@ class QiZhengAnalyzer:
 
 
 # ── Yearly luck analysis (dayun + liunian) ──
+
+
+def structural_yearly_sync(
+    chart: str,
+    *,
+    gender: str = "male",
+    birth_year: Optional[int] = None,
+    years: int = 10,
+    start_year: Optional[int] = None,
+    dignity_table: Optional[Dict[str, Dict[str, set]]] = None,
+) -> Dict[str, Any]:
+    """Sync structural yearly (no LLM) for product packages and offline export.
+
+    Uses the same rule-based path as ``analyze_yearly`` fallback.
+    """
+    normalized = _normalize_chart(chart)
+    if normalized is None:
+        return {
+            "error": "无效的命盘格式",
+            "dayun_summary": [],
+            "yearly_analysis": [],
+            "structural_summary": {},
+            "trust": "certain_simplified",
+        }
+    chart = normalized
+    current_year = datetime.now().year
+    birth_year = int(birth_year or current_year)
+    years = max(1, min(int(years or 10), 30))
+    start = int(start_year) if start_year else current_year
+    end = start + years - 1
+
+    dayun = qz_calendar.dayun_list(chart, gender, until_age=80)
+    for d in dayun:
+        d["start_year"] = birth_year + int(d["start_age"])
+        d["end_year"] = birth_year + int(d["end_age"]) - 1
+    dayun_active = [
+        d
+        for d in dayun
+        if d["end_age"] >= (start - birth_year)
+        and d["start_age"] <= (end - birth_year)
+    ]
+    liunian = qz_calendar.liunian_list(start, end)
+    profile = qz_calendar.structural_profile(chart) or {}
+    return _rule_based_yearly(
+        chart,
+        dayun_active,
+        liunian,
+        birth_year,
+        profile=profile,
+        dignity_table=dignity_table,
+    )
+
 
 _STEM_ELEMENT = {
     "甲": "木", "乙": "木",
@@ -1044,11 +1132,31 @@ def _rule_based_yearly(
     if last_error:
         caveats.append(str(last_error))
 
+    patterns = profile.get("patterns") or []
+    pattern_names = [
+        (p.get("name") if isinstance(p, dict) else str(p)) for p in patterns
+    ][:6]
+    structural_summary = {
+        "chart": profile.get("chart") or chart,
+        "day_master": profile.get("day_master") or "",
+        "life_palace": profile.get("life_palace") or "",
+        "body_palace": profile.get("body_palace") or "",
+        "body_lord": profile.get("body_lord") or "",
+        "five_element_pattern": profile.get("five_element_pattern") or "",
+        "hour_branch": profile.get("hour_branch") or "",
+        "patterns": [n for n in pattern_names if n],
+        "dayun_count": len(dayun_summary),
+        "liunian_count": len(yearly_analysis),
+    }
+
     return {
         "dayun_summary": dayun_summary,
         "yearly_analysis": yearly_analysis,
         "overall_guidance": "当前为本地规则兜底分析，已将大限宫位与流年干支结合推断；建议配置稳定 AI 服务以获取更深度解读。",
         "confidence": "low",
+        "trust": "certain_simplified",
+        "note": "结构层：大限宫位 + 流年干支生克 + 宫主星庙旺/太岁关系（确定性简化口径）。",
+        "structural_summary": structural_summary,
         "caveats": caveats,
         "_rule_based": True,
     }

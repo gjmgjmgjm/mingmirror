@@ -5,13 +5,16 @@ import { useChart } from "../contexts/ChartContext";
 import {
   listEvents,
   createEvent,
+  deleteEvent,
   calibrateChart,
+  fetchLatestCalibration,
   type LifeEvent,
   type EventType,
   type CalibrationResponse,
 } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
 import { SectionCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
+import { track } from "../lib/analytics";
 
 const EVENT_TYPE_LABELS: Record<EventType, string> = {
   study: "学业",
@@ -49,7 +52,7 @@ function todayInputValue() {
 }
 
 export default function Events() {
-  const { chart } = useChart();
+  const { chart, chartScopeId } = useChart();
   const [events, setEvents] = useState<LifeEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -62,35 +65,52 @@ export default function Events() {
   const [description, setDescription] = useState("");
 
   const loadEvents = useCallback(async () => {
-    if (!chart) return;
+    if (!chart || !chartScopeId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await listEvents(chart.bazi);
+      const data = await listEvents(chartScopeId);
       setEvents(data);
+      try {
+        const latest = await fetchLatestCalibration(chartScopeId);
+        setResult(latest);
+      } catch {
+        // 404 = no prior calibration; ignore
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "加载失败";
       setError(message);
     } finally {
       setLoading(false);
     }
-  }, [chart]);
+  }, [chart, chartScopeId]);
 
   useEffect(() => {
     loadEvents();
   }, [loadEvents]);
 
+  const handleDelete = async (eventId: string) => {
+    if (!chartScopeId) return;
+    try {
+      await deleteEvent(chartScopeId, eventId);
+      await loadEvents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chart) return;
+    if (!chartScopeId) return;
     setSubmitting(true);
     setError(null);
     try {
-      await createEvent(chart.bazi, {
+      await createEvent(chartScopeId, {
         event_type: eventType,
         happened_at: happenedAt,
         description,
       });
+      track("event_added", { event_type: eventType }, chartScopeId);
       setDescription("");
       await loadEvents();
     } catch (err) {
@@ -102,12 +122,13 @@ export default function Events() {
   };
 
   const handleCalibrate = async () => {
-    if (!chart) return;
+    if (!chartScopeId) return;
     setCalibrating(true);
     setError(null);
     setResult(null);
     try {
-      const data = await calibrateChart(chart.bazi);
+      const data = await calibrateChart(chartScopeId);
+      track("calibrate_run", { event_count: data.event_count }, chartScopeId);
       setResult(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "校准失败";
@@ -145,6 +166,9 @@ export default function Events() {
           </p>
           <p className="text-xs text-ink-500 dark:text-ink-400">
             已记录 {events.length} 个事件
+            {chart.id && (
+              <span className="ml-2 text-ink-400">· ID {chart.id.slice(0, 8)}…</span>
+            )}
           </p>
         </div>
       </SectionCard>
@@ -245,6 +269,13 @@ export default function Events() {
                       </p>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(event.id)}
+                    className="shrink-0 text-xs text-ink-400 transition hover:text-vermilion"
+                  >
+                    删除
+                  </button>
                 </div>
               </div>
             ))}

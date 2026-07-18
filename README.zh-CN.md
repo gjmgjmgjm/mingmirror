@@ -1,4 +1,4 @@
-# 抖音下载器 V2.0（Douyin Downloader）
+# 抖音下载器 V2.0 + 命镜 MingMirror
 
 <p align="center">
   <img src="https://socialify.git.ci/jiji262/douyin-downloader/image?custom_description=%E6%8A%96%E9%9F%B3%E6%89%B9%E9%87%8F%E4%B8%8B%E8%BD%BD%E5%B7%A5%E5%85%B7%EF%BC%8C%E5%8E%BB%E6%B0%B4%E5%8D%B0%EF%BC%8C%E6%94%AF%E6%8C%81%E8%A7%86%E9%A2%91%E3%80%81%E5%9B%BE%E9%9B%86%E3%80%81%E4%BD%9C%E8%80%85%E4%B8%BB%E9%A1%B5%E6%89%B9%E9%87%8F%E4%B8%8B%E8%BD%BD%E3%80%82&description=1&font=Jost&forks=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fjiji262%2Fdouyin-downloader%2Frefs%2Fheads%2FV1.0%2Fimg%2Flogo.png&name=1&owner=1&pattern=Circuit+Board&pulls=1&stargazers=1&theme=Light" alt="douyin-downloader" width="820" />
@@ -9,12 +9,52 @@
         <img src="https://github.com/jiji262/douyin-downloader/actions/workflows/ci.yml/badge.svg" /></a>
 </p>
 
-一个面向实用场景的抖音下载工具，支持视频、图文、合集、音乐、收藏夹等多种类型下载，以及作者主页批量下载，默认带进度展示、重试、数据库去重、下载完整性校验和浏览器兜底能力。
+本仓库包含两条产品线：
+
+1. **抖音下载器**：视频 / 图文 / 合集 / 作者主页批量下载（原 V2.0 能力）
+2. **命镜 MingMirror**：多体系命理结构层（八字 / 紫微 / 七政）+ 流年 + 标准交付包 + 可部署 Web UI
 
 > 当前文档对应 **V2.0（main 分支）**。  
-> 如需使用旧版，请切回 **V1.0**：`git fetch --all && git switch V1.0`
+> 如需使用旧版下载器，请切回 **V1.0**：`git fetch --all && git switch V1.0`
 
-## 功能概览
+---
+
+## 命镜 MingMirror（产品演示）
+
+**一句话**：结构层优先的命运数字孪生——排盘可复核，流年可导出，AI 为可选增强。
+
+| 能力 | 说明 |
+|------|------|
+| 八字 | 排盘、用神、六亲、大运流年、合婚择日、命书 |
+| 紫微 | 命身宫、主辅煞、四化、大限、**太岁入宫流年** |
+| 七政 | 命身宫、宫主庙旺、大限、**年运规则层** |
+| 交付包 v1.3 | Markdown + 打印 HTML；多体系流年附录；「今年」高亮；区间可配 |
+| 产品化 | 命盘 UUID、权益/漏斗、Admin、演示支付码 |
+
+### 30 秒上手
+
+```bash
+# Windows
+.\scripts\start_demo.ps1
+
+# macOS / Linux
+chmod +x scripts/start_demo.sh && ./scripts/start_demo.sh
+
+# 或 Docker
+docker compose up --build -d
+# 打开 http://localhost:8000/app/
+```
+
+- 首页点 **「一键演示」** 加载固定样例命盘  
+- 套餐页演示码：**`demo-pro`**（完整版 30 天）  
+- 离线校验：`python scripts/demo_smoke.py`  
+- 部署细节：[docs/DEPLOY.md](./docs/DEPLOY.md) · 产品愿景：[docs/PRD-mingmirror.md](./docs/PRD-mingmirror.md)
+
+结构层 **无需** API Key 即可排盘与导出；配置 `DEEPSEEK_API_KEY` 后可开启 AI 章节。
+
+---
+
+## 抖音下载 · 功能概览
 
 ### 已支持
 

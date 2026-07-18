@@ -12,6 +12,7 @@
 | 文件 | 主线 | 说明 |
 |------|------|------|
 | [../PROJECT_SUMMARY.md](../PROJECT_SUMMARY.md) | 全局 | 架构、能力、测试统计总览(含命理记分板与尺子入口) |
+| [DEPLOY.md](./DEPLOY.md) | 命理/产品 | Docker Compose、支付 webhook、运营看板、环境变量 |
 | [PRD-mingmirror.md](./PRD-mingmirror.md) | 命理 | 命镜产品需求:数字孪生 / 多 Agent 议会 / 事件反推校准 / 择日引擎 / 命运剧本 |
 | [bazi_ai_90_roadmap.md](./bazi_ai_90_roadmap.md) | 命理 | 八字准确率推进计划(Phase 0–5 + §7「真人结构层」战略转向) |
 | [bazi_ai_error_analysis.md](./bazi_ai_error_analysis.md) | 命理 | 八字错误类型诊断、占比与修复优先级 |
@@ -32,13 +33,13 @@
 | 格局 | 100% | 确定性注入(月令定格,非 accuracy) |
 | 忌神 | 92% | 确定性注入(规则引擎,非 accuracy) |
 | 旺衰 | 75% | LLM-引擎一致性(非 accuracy) |
-| 六亲强弱 | 77% (30/39, det) | ✅ 真实(杨炎 gold,det 绕过 LLM) |
+| 六亲强弱 | 85% (33/39, det, 噪声剔除) | ✅ 真实(杨炎 gold,det 绕过 LLM) |
 | 具体事件/年份 | 0% 开放式 / 40% MCQ | 真实(名人验证事件) |
 
 > **口径说明**
 > - ✅ 真实 = 有独立 / 权威 gold,数字可 cite;格局/忌神/旺衰是**确定性注入或 LLM-引擎一致性**,**不是 accuracy**(不证明对错),需 gold 才算准确率。
-> - **「结构层 90%」目标框定**:仅指**有独立 gold 的维度**——排盘 100%、用神 90% 已达成;**六亲 77%(det,n=39)未达 90%,是结构层唯一 accuracy 短板**(加"星被耗泄→弱"判定后 74→77,父亲 75→83,zero regression;剩余 9 错例约半为 gold 噪声,边际递减)。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**不计入**;事件层是物理天花板。
-> - **六亲** det 全量 n=39,准确率 **77%**(加"星被耗泄→弱"判定后 74→77,zero regression;threshold 1.0 会 over-fire 误伤配偶→69%,故选 1.5)。剩余 9 错例:坏根 over-fire vs gold 主观 + 个别耗泄阈值未触。e2e deepseek prose 口径 ~73–77%。详见 `bazi_ai_90_roadmap.md` 与 memory。
+> - **「结构层 90%」目标框定**:仅指**有独立 gold 的维度**——排盘 100%、用神 90% 已达成;**六亲 85%(det,n=39)** 经母星正偏印同参、子女双星匹配、3 条大运/误检噪声剔除后过 80%。格局/忌神/旺衰**不计入**;事件层是物理天花板。
+> - **六亲** det:启发式再加「坐支通根」等规则实测回退至 67–69%,故停在可解释清洗而非过拟合。详见 `validate_liuqin_det.py` 的 `_DET_NOISE`。
 > - **事件层开放式 ≈0% 是物理天花板**,非 bug——产品应输出**趋势**而非断言。
 
 刷新需 API 的维度(设定 `DEEPSEEK_API_KEY` 后):
@@ -72,7 +73,7 @@ python benchmarks/baziqa/validate_mingli.py  --limit 12     # 事件/年份
 ## 项目亮点速览
 
 - **下载器**:无水印下载、并发限速重试、SQLite 去重增量、`post`/`like`/`mix`/`music` 浏览器兜底、FastAPI server(job 提交 / 取消 / SSE / 配置覆盖)、CI 全覆盖(Python 3.9–3.12 矩阵)。
-- **命镜**:四柱校验、领域感知 RAG + embedding、规则引擎兜底、用神引擎(扶抑 + 调候 + 通关)、取象专字段、多轮 ensemble、**多模型辩论 `ensemble_debate`**(chat+reasoner + critic 结构裁决);八字 / 紫微 / 七政四余 / 多命理融合 REST API;React Web UI(Dashboard / Chart / Yearly / Qizheng / Ziwei / Council / Sandbox / Script / Cases / Calendar)。
+- **命镜**:四柱校验、领域感知 RAG + embedding、规则引擎兜底、用神引擎(扶抑 + 调候 + 通关)、取象专字段、多轮 ensemble、**多模型辩论 `ensemble_debate`**(chat+reasoner + critic 结构裁决);**择日引擎**(用神+冲合+十二时辰吉时、8 类事项、`.ics` 导出);可解释命书报告;`/report` + `/auspicious` REST;八字 / 紫微 / 七政四余 / 多命理融合;React Web UI(Dashboard / Chart / Yearly / Qizheng / Ziwei / Council / Sandbox / Script / Cases / Calendar / ReadingReport)。
 
 ## 相关入口
 

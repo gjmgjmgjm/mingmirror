@@ -12,6 +12,8 @@ import Ziwei from "./pages/Ziwei";
 import Cases from "./pages/Cases";
 import Script from "./pages/Script";
 import Events from "./pages/Events";
+import Pricing from "./pages/Pricing";
+import Admin from "./pages/Admin";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -31,6 +33,8 @@ function AnimatedRoutes() {
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/script" element={<Script />} />
         <Route path="/events" element={<Events />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/admin" element={<Admin />} />
       </Routes>
     </div>
   );

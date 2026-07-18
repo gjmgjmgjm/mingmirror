@@ -49,6 +49,7 @@ class DomainConclusion:
     domain: str
     text: str
     confidence: str = "medium"
+    system: str = ""  # optional source system id (bazi/ziwei/qizheng) for weighted fusion
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

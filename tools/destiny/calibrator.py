@@ -167,6 +167,228 @@ class JsonlEventStore(InMemoryEventStore):
         return result
 
 
+class SqliteEventStore(InMemoryEventStore):
+    """SQLite-backed event store (+ optional calibration result cache).
+
+    Implements the same sync interface as :class:`InMemoryEventStore` so the
+    server and calibrator need no async rewrite. Uses a dedicated connection
+    with WAL for concurrent readers.
+
+    On first open, optionally migrates an existing JSONL file (one-shot).
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        migrate_from_jsonl: Optional[Path] = None,
+    ) -> None:
+        super().__init__()
+        import sqlite3
+        import time
+
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._sqlite3 = sqlite3
+        self._time = time
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._init_schema()
+        self._load_into_memory()
+        if migrate_from_jsonl and Path(migrate_from_jsonl).exists():
+            self._migrate_jsonl(Path(migrate_from_jsonl))
+
+    def _init_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS life_event (
+                id TEXT PRIMARY KEY,
+                chart_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                happened_at TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                predicted_by_agent TEXT,
+                match_score REAL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_life_event_chart
+                ON life_event(chart_id);
+            CREATE INDEX IF NOT EXISTS idx_life_event_happened
+                ON life_event(happened_at);
+
+            CREATE TABLE IF NOT EXISTS calibration_result (
+                id TEXT PRIMARY KEY,
+                chart_id TEXT NOT NULL,
+                event_count INTEGER NOT NULL,
+                average_score REAL NOT NULL,
+                system_scores TEXT NOT NULL,
+                adjusted_weights TEXT NOT NULL,
+                suggested_hour_offset INTEGER,
+                events_detail TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_calibration_chart
+                ON calibration_result(chart_id);
+            CREATE INDEX IF NOT EXISTS idx_calibration_created
+                ON calibration_result(created_at);
+            """
+        )
+        self._conn.commit()
+
+    def _row_to_event(self, row: Any) -> LifeEvent:
+        return LifeEvent(
+            id=row["id"],
+            chart_id=row["chart_id"],
+            event_type=row["event_type"],
+            happened_at=row["happened_at"],
+            description=row["description"] or "",
+            predicted_by_agent=row["predicted_by_agent"],
+            match_score=row["match_score"],
+        )
+
+    def _load_into_memory(self) -> None:
+        self._events.clear()
+        cur = self._conn.execute(
+            "SELECT * FROM life_event ORDER BY happened_at ASC, created_at ASC"
+        )
+        for row in cur.fetchall():
+            event = self._row_to_event(row)
+            self._events.setdefault(event.chart_id, []).append(event)
+
+    def _migrate_jsonl(self, jsonl_path: Path) -> None:
+        """Import JSONL events that are not already in SQLite (by id)."""
+        existing = set()
+        cur = self._conn.execute("SELECT id FROM life_event")
+        existing.update(r[0] for r in cur.fetchall())
+        imported = 0
+        try:
+            with jsonl_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    eid = data.get("id")
+                    if not eid or eid in existing:
+                        continue
+                    try:
+                        event = LifeEvent(
+                            id=eid,
+                            chart_id=data["chart_id"],
+                            event_type=data["event_type"],
+                            happened_at=data["happened_at"],
+                            description=data.get("description") or "",
+                            predicted_by_agent=data.get("predicted_by_agent"),
+                            match_score=data.get("match_score"),
+                        )
+                    except (KeyError, TypeError):
+                        continue
+                    self._insert_event(event)
+                    self._events.setdefault(event.chart_id, []).append(event)
+                    existing.add(eid)
+                    imported += 1
+        except OSError:  # pragma: no cover
+            return
+        if imported:
+            self._conn.commit()
+
+    def _insert_event(self, event: LifeEvent) -> None:
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO life_event
+            (id, chart_id, event_type, happened_at, description,
+             predicted_by_agent, match_score, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.id,
+                event.chart_id,
+                event.event_type,
+                event.happened_at,
+                event.description or "",
+                event.predicted_by_agent,
+                event.match_score,
+                int(self._time.time()),
+            ),
+        )
+
+    def add(self, event: LifeEvent) -> None:
+        self._insert_event(event)
+        self._conn.commit()
+        super().add(event)
+
+    def delete(self, chart_id: str, event_id: str) -> bool:
+        cur = self._conn.execute(
+            "DELETE FROM life_event WHERE chart_id = ? AND id = ?",
+            (chart_id, event_id),
+        )
+        self._conn.commit()
+        if cur.rowcount and cur.rowcount > 0:
+            super().delete(chart_id, event_id)
+            return True
+        # keep memory consistent even if row missing
+        return super().delete(chart_id, event_id)
+
+    def save_calibration(self, result: Dict[str, Any]) -> str:
+        """Persist a calibration run; returns result id."""
+        rid = str(uuid.uuid4())
+        self._conn.execute(
+            """
+            INSERT INTO calibration_result
+            (id, chart_id, event_count, average_score, system_scores,
+             adjusted_weights, suggested_hour_offset, events_detail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rid,
+                result.get("chart_id") or "",
+                int(result.get("event_count") or 0),
+                float(result.get("average_score") or 0.0),
+                json.dumps(result.get("system_scores") or {}, ensure_ascii=False),
+                json.dumps(result.get("adjusted_weights") or {}, ensure_ascii=False),
+                result.get("suggested_hour_offset"),
+                json.dumps(result.get("events") or [], ensure_ascii=False),
+                int(self._time.time()),
+            ),
+        )
+        self._conn.commit()
+        return rid
+
+    def latest_calibration(self, chart_id: str) -> Optional[Dict[str, Any]]:
+        cur = self._conn.execute(
+            """
+            SELECT * FROM calibration_result
+            WHERE chart_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (chart_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "chart_id": row["chart_id"],
+            "event_count": row["event_count"],
+            "average_score": row["average_score"],
+            "system_scores": json.loads(row["system_scores"] or "{}"),
+            "adjusted_weights": json.loads(row["adjusted_weights"] or "{}"),
+            "suggested_hour_offset": row["suggested_hour_offset"],
+            "events": json.loads(row["events_detail"] or "[]"),
+            "created_at": row["created_at"],
+        }
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None  # type: ignore[assignment]
+
+
 def _extract_year(happened_at: str) -> Optional[int]:
     """Extract a 4-digit year from an ISO-like date/datetime string."""
     if not happened_at:
@@ -235,12 +457,15 @@ class DestinyCalibrator:
         self,
         chart_info: ChartInfo,
         events: Optional[List[LifeEvent]] = None,
+        storage_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run calibration for a chart.
 
         Args:
-            chart_info: the chart to calibrate.
+            chart_info: the chart to calibrate (bazi used for analysis).
             events: optional explicit event list; otherwise loaded from store.
+            storage_key: id used for store lookup / result chart_id
+                (UUID preferred); defaults to ``chart_info.bazi``.
 
         Returns:
             Dict with per-system scores, adjusted weights, suggested hour
@@ -249,10 +474,13 @@ class DestinyCalibrator:
         if isinstance(chart_info, dict):
             chart_info = ChartInfo(**chart_info)
 
-        event_list = events if events is not None else self.event_store.list(chart_info.bazi)
+        scope = (storage_key or chart_info.bazi or "").strip()
+        event_list = (
+            events if events is not None else self.event_store.list(scope)
+        )
         if not event_list:
             return {
-                "chart_id": chart_info.bazi,
+                "chart_id": scope,
                 "event_count": 0,
                 "average_score": 0.0,
                 "system_scores": {},
@@ -332,8 +560,8 @@ class DestinyCalibrator:
 
         suggested_offset = _suggest_hour_offset(average_score, len(event_list))
 
-        return {
-            "chart_id": chart_info.bazi,
+        result = {
+            "chart_id": scope,
             "event_count": len(event_list),
             "average_score": average_score,
             "system_scores": aggregated,
@@ -341,3 +569,11 @@ class DestinyCalibrator:
             "suggested_hour_offset": suggested_offset,
             "events": event_details,
         }
+        # Persist when store supports it (SqliteEventStore).
+        save = getattr(self.event_store, "save_calibration", None)
+        if callable(save) and event_list:
+            try:
+                result["calibration_id"] = save(result)
+            except Exception:  # pragma: no cover - persistence best-effort
+                pass
+        return result

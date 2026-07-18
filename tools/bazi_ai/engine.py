@@ -39,6 +39,7 @@ from tools.bazi_ai.bazi_structural import (
     structural_profile,
     wealth_power_resource_flow,
 )
+from tools.bazi_ai.shensha import shensha_profile
 from tools.bazi_ai.bazi_validator import (
     day_master,
     extract_pillars,
@@ -384,6 +385,7 @@ def _build_user_prompt(
     structural_facts: Optional[Dict] = None,
     dayun_list: Optional[List[Dict]] = None,
     flow_facts: Optional[Dict] = None,
+    shensha_facts: Optional[Dict] = None,
 ) -> str:
     cases_text = "\n\n".join(
         f"案例 {i+1}：\n八字：{c.get('bazi')}\n命理师分析：{c.get('analysis_corrected', '')[:500]}"
@@ -451,6 +453,23 @@ def _build_user_prompt(
     if flow_facts and flow_facts.get("exists"):
         flow_text = f"【特殊流通结构】\n{flow_facts.get('description', '')}"
 
+    shensha_text = ""
+    if shensha_facts:
+        present = [s for s in (shensha_facts.get("stars") or []) if s.get("present")]
+        if present:
+            star_lines = []
+            for s in present:
+                locs = "、".join(
+                    f"{l.get('pillar', '')}{l.get('position', '')}{l.get('char', '')}"
+                    for l in s.get("locations", [])
+                )
+                star_lines.append(f"- {s['name']}（{s.get('category', '')}）落：{locs}——{s.get('description', '')}")
+            shensha_text = (
+                "【神煞事实】（由程序查表严格计算，存在性非此即彼，以此为依据、禁止发明星曜）\n"
+                + shensha_facts.get("summary_text", "") + "\n"
+                + "\n".join(star_lines)
+            )
+
     gender_label = "男命" if gender in ("male", "男") else "女命"
 
     return f"""请为以下八字做详细分析，像一位真人命理师面对面跟命主交谈那样回答。
@@ -466,6 +485,8 @@ def _build_user_prompt(
 {dayun_text}
 
 {flow_text}
+
+{shensha_text}
 
 【六亲星宫事实】（由程序严格计算，你必须以此为依据，禁止把星和宫的位置说错）
 **六亲强弱（每条末尾括号内 强/弱）由程序按"星根是否被冲/合化坏"判定，直接采用。** 尤其"有根、但被逢冲/合化坏根，实为虚浮无力"必须判**弱**——不要因为字面看到"有根/透干"就自行改判强。
@@ -531,6 +552,7 @@ def _build_user_prompt(
   "personality": "根据日主、十神、五行喜忌，描述命主的性格、行为模式与气质特点，200字以内。",
   "events": ["趋势1：用概率语气的事件倾向（如'中年易有感情波折'，禁止'必离婚'）", "趋势2", "趋势3"],
   "summary": ["3-5条核心断语"],
+  "shensha_summary": "（可选）若命局有显著神煞（天乙贵人/文昌/羊刃/驿马/桃花/空亡/魁罡等），用1-3句说明其吉凶倾向与对命局的影响；无显著神煞可留空字符串。星曜是否存在以上方【神煞事实】为准，禁止发明星曜。",
   "confidence": "high|medium|low",
   "caveats": ["可能的误差来源"]
 }}
@@ -608,6 +630,7 @@ async def analyze_bazi(
     structural_facts = structural_profile(bazi) or {}
     liuqin_facts = liuqin_profile(bazi, gender=gender) or {}
     flow_facts = wealth_power_resource_flow(bazi)
+    shensha_facts = shensha_profile(bazi, gender=gender) or {}
 
     # Compute dayun if birth info is available so wealth/destiny levels can be
     # judged against the full life trajectory, not just the static chart.
@@ -635,6 +658,7 @@ async def analyze_bazi(
         structural_facts=structural_facts,
         dayun_list=dayun_list_data,
         flow_facts=flow_facts,
+        shensha_facts=shensha_facts,
     )
 
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
@@ -2023,6 +2047,8 @@ async def analyze_yearly(
     birth_time: str = "00:00",
     calendar_type: str = "solar",
     mode: str = "10y",
+    start_year: Optional[int] = None,
+    years: Optional[int] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -2036,8 +2062,9 @@ async def analyze_yearly(
 ) -> Dict:
     """Analyze yearly luck (liunian) based on dayun and birth info.
 
-    *mode* can be ``"10y"`` for the next 10 years, or ``"lifetime"`` for a
-    full reading until age 80.
+    *mode* can be ``"10y"`` / ``"20y"`` / ``"lifetime"``.
+    Optional *start_year* + *years* override the mode-derived calendar range
+    (aligned with 紫微/七政 frontend controls).
     """
     normalized = normalize_bazi(bazi)
     if normalized is None:
@@ -2065,7 +2092,11 @@ async def analyze_yearly(
         until_age=until_age,
     )
 
-    if mode == "10y":
+    if start_year is not None and years is not None:
+        start_year = int(start_year)
+        span = max(1, min(int(years), 80))
+        end_year = start_year + span - 1
+    elif mode == "10y":
         start_year = current_year
         end_year = current_year + 9
     elif mode == "20y":
@@ -2946,6 +2977,8 @@ def _validate_output(result: Dict, bazi: str) -> Dict:
         result["marriage_evidence"] = _sanitize_text(result["marriage_evidence"])
     if isinstance(result.get("liuqin_analysis"), str):
         result["liuqin_analysis"] = _sanitize_text(result["liuqin_analysis"])
+    if isinstance(result.get("shensha_summary"), str):
+        result["shensha_summary"] = _sanitize_text(result["shensha_summary"])
 
     # Normalize and validate wealth/marriage levels.
     _WEALTH_LEVELS = {"贫", "温饱", "小康", "中产", "小富", "中富", "大富", "巨富"}

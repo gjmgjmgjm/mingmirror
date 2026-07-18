@@ -110,3 +110,49 @@ def test_create_event_invalid_type(tmp_path):
             },
         )
         assert resp.status_code == 400
+
+
+def test_delete_event_and_latest_calibration(tmp_path):
+    config = ConfigLoader(None)
+    config.update(path=str(tmp_path))
+    app = build_app(config)
+    assert app.state.calibrator is not None
+    app.state.calibrator.analyzer = _mock_analyzer()
+
+    chart = "庚午 辛巳 庚辰 壬午"
+    chart_enc = "庚午%20辛巳%20庚辰%20壬午"
+
+    with TestClient(app) as client:
+        # no calibration yet
+        resp = client.get(f"/api/v1/charts/{chart_enc}/calibrate/latest")
+        assert resp.status_code == 404
+
+        resp = client.post(
+            f"/api/v1/charts/{chart_enc}/events",
+            json={
+                "event_type": "job",
+                "happened_at": "2021-03-01",
+                "description": "入职",
+            },
+        )
+        assert resp.status_code == 200
+        event_id = resp.json()["id"]
+
+        resp = client.post(f"/api/v1/charts/{chart_enc}/calibrate")
+        assert resp.status_code == 200
+        assert resp.json().get("calibration_id")
+
+        resp = client.get(f"/api/v1/charts/{chart_enc}/calibrate/latest")
+        assert resp.status_code == 200
+        assert resp.json()["event_count"] == 1
+        assert resp.json()["chart_id"] == chart
+
+        resp = client.delete(f"/api/v1/charts/{chart_enc}/events/{event_id}")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
+        resp = client.get(f"/api/v1/charts/{chart_enc}/events")
+        assert resp.json() == []
+
+        resp = client.delete(f"/api/v1/charts/{chart_enc}/events/missing")
+        assert resp.status_code == 404

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useChart } from "../contexts/ChartContext";
 import { analyzeQizheng, type QizhengResult } from "../api/client";
@@ -39,16 +39,12 @@ export default function Qizheng() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleAnalyze = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const runAnalyze = async (q: string) => {
     if (!chart) return;
-
     setLoading(true);
     setError(null);
-    setResult(null);
-
     try {
-      const data = await analyzeQizheng(chart.bazi, question.trim(), dignityTable);
+      const data = await analyzeQizheng(chart.bazi, q, dignityTable);
       setResult(data.result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "七政四余分析失败";
@@ -56,6 +52,19 @@ export default function Qizheng() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Auto structural load
+  useEffect(() => {
+    if (!chart) return;
+    void runAnalyze("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chart?.bazi, dignityTable]);
+
+  const handleAnalyze = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setResult(null);
+    await runAnalyze(question.trim());
   };
 
   if (!chart) {
@@ -171,10 +180,22 @@ export default function Qizheng() {
                 term="身宫"
               />
               <InfoItem
-                label="主星"
-                value={result.basic_info.dominant_stars?.join("、") ?? "—"}
+                label="身主 / 主星"
+                value={
+                  (result.basic_info as { body_lord?: string }).body_lord ||
+                  result.basic_info.dominant_stars?.join("、") ||
+                  "—"
+                }
                 delay={160}
                 term="主星"
+              />
+              <InfoItem
+                label="五行局"
+                value={
+                  (result.basic_info as { five_element_pattern?: string })
+                    .five_element_pattern || "—"
+                }
+                delay={180}
               />
               <InfoItem
                 label="置信度"
@@ -186,6 +207,11 @@ export default function Qizheng() {
                 delay={200}
               />
             </div>
+            {result.summary && result.summary.length > 0 && (
+              <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+                {result.summary.join(" · ")}
+              </p>
+            )}
 
             {result.basic_info.twelve_palaces &&
               Object.keys(result.basic_info.twelve_palaces).length > 0 && (

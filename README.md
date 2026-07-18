@@ -16,8 +16,26 @@
 
 A practical Douyin downloader supporting videos, image-notes, collections, music, favorites collections, and profile batch downloads, with progress display, retries, SQLite deduplication, download integrity checks, and browser fallback support.
 
+This repository also ships **MingMirror（命镜）**: a multi-system destiny product (Bazi / Ziwei / Qizheng) with structural charts, yearly luck, print/PDF delivery packages, and a React UI at `/app`.
+
 > This document targets **V2.0 (`main` branch)**.  
-> For the legacy version, switch to **V1.0**: `git fetch --all && git switch V1.0`
+> For the legacy version, switch to **V1.0**: `git fetch --all && git switch V1.0`  
+> Chinese product guide: [README.zh-CN.md](./README.zh-CN.md) · Deploy: [docs/DEPLOY.md](./docs/DEPLOY.md)
+
+### MingMirror quick demo
+
+```bash
+# Offline structure smoke (demo charts + packages)
+python scripts/demo_smoke.py
+
+# Local serve (Windows)
+.\scripts\start_demo.ps1
+
+# Docker
+docker compose up --build -d
+# open http://localhost:8000/app/  → “一键演示” sample charts
+# Pricing demo code: demo-pro
+```
 
 ## Feature Overview
 
@@ -39,7 +57,9 @@ A practical Douyin downloader supporting videos, image-notes, collections, music
 | **Hot search + keyword search** | `--hot-board [N]` / `--search "keyword"` dumps to JSONL |
 | **REST API server mode** | `--serve --serve-port 8000` (optional `fastapi + uvicorn`) |
 | **Bazi (八字) analysis API** | `POST /api/v1/bazi/analyze` / `timeline` / `yearly` with DeepSeek + RAG |
-| **Zi Wei / Qi Zheng APIs** | `POST /api/v1/destiny/analyze` / `council` / `daily` multi-system fusion |
+| **Zi Wei / Qi Zheng APIs** | `/ziwei/*` `/qizheng/*` + `destiny/analyze` / `council` / `daily` multi-system fusion |
+| **Product package export** | Standard 命书 MD+HTML, multi-system yearly appendix, current-year highlight |
+| **Demo charts** | `GET /api/v1/product/demo-charts` + Dashboard one-click load |
 | **Bundled web UI** | React + Vite MingMirror frontend served at `/app` |
 | **Notification push** | Bark / Telegram / Webhook on download completion |
 | Extra assets | Cover, music, avatar, JSON metadata |

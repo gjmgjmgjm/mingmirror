@@ -72,6 +72,7 @@ def align(raw_result: Dict[str, Any], system: str) -> List[DomainConclusion]:
                 domain=domain,
                 text=text,
                 confidence=confidence,
+                system=system,
             )
         )
     return conclusions
