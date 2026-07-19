@@ -77,13 +77,25 @@ export function setEntitlement(ent: Entitlement): void {
   setEntitlementLocal(ent);
 }
 
-/** Pull server entitlement and cache locally. */
+/** Pull server entitlement and cache locally (Bearer → user: scope). */
 export async function refreshEntitlementFromServer(): Promise<Entitlement> {
   const deviceId = getDeviceId();
   try {
+    let authHdrs: Record<string, string> = {};
+    try {
+      const { authHeaders } = await import("./auth");
+      authHdrs = authHeaders();
+    } catch {
+      authHdrs = {};
+    }
     const res = await fetch(
       `${API_PREFIX}/product/entitlement?device_id=${encodeURIComponent(deviceId)}`,
-      { headers: { Accept: "application/json" } }
+      {
+        headers: {
+          Accept: "application/json",
+          ...authHdrs,
+        },
+      }
     );
     if (!res.ok) return getEntitlement();
     const data = await res.json();
@@ -101,9 +113,20 @@ const DEMO_CODE = "demo-pro";
 export async function activateProDemo(days = 30): Promise<Entitlement> {
   const deviceId = getDeviceId();
   try {
+    let authHdrs: Record<string, string> = {};
+    try {
+      const { authHeaders } = await import("./auth");
+      authHdrs = authHeaders();
+    } catch {
+      authHdrs = {};
+    }
     const res = await fetch(`${API_PREFIX}/product/entitlement/activate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...authHdrs,
+      },
       body: JSON.stringify({
         device_id: deviceId,
         action: "pro",
@@ -137,9 +160,20 @@ export async function activateProDemo(days = 30): Promise<Entitlement> {
 export async function buyPackageCredit(n = 1): Promise<Entitlement> {
   const deviceId = getDeviceId();
   try {
+    let authHdrs: Record<string, string> = {};
+    try {
+      const { authHeaders } = await import("./auth");
+      authHdrs = authHeaders();
+    } catch {
+      authHdrs = {};
+    }
     const res = await fetch(`${API_PREFIX}/product/entitlement/activate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...authHdrs,
+      },
       body: JSON.stringify({
         device_id: deviceId,
         action: "credit",

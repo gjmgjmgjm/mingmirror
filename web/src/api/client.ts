@@ -238,6 +238,7 @@ export interface AuthUserDto {
   created_at?: number;
   updated_at?: number;
   is_active?: boolean;
+  email_verified?: boolean;
 }
 
 export interface AuthSessionResponse {
@@ -245,6 +246,8 @@ export interface AuthSessionResponse {
   token: string;
   expires_at: number;
   token_type: string;
+  email_verify_token?: string;
+  email_verify_hint?: string;
 }
 
 export function registerAccount(payload: {
@@ -296,6 +299,46 @@ export function changeAuthPassword(payload: {
   new_password: string;
 }): Promise<AuthSessionResponse & { ok: boolean; message?: string }> {
   return fetchJson("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function requestEmailVerify(): Promise<{
+  ok: boolean;
+  email_verify_token?: string;
+  email_verify_hint?: string;
+}> {
+  return fetchJson("/auth/request-verify", { method: "POST" });
+}
+
+export function verifyEmailToken(token: string): Promise<{
+  ok: boolean;
+  user: AuthUserDto;
+}> {
+  return fetchJson("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function forgotPassword(email: string): Promise<{
+  ok: boolean;
+  message?: string;
+  reset_token?: string;
+  reset_hint?: string;
+}> {
+  return fetchJson("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(payload: {
+  token: string;
+  new_password: string;
+}): Promise<AuthSessionResponse & { ok: boolean }> {
+  return fetchJson("/auth/reset-password", {
     method: "POST",
     body: JSON.stringify(payload),
   });

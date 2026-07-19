@@ -50,6 +50,7 @@ function toUser(dto: AuthUserDto): AuthUser {
     created_at: dto.created_at,
     updated_at: dto.updated_at,
     is_active: dto.is_active,
+    email_verified: dto.email_verified,
   };
 }
 

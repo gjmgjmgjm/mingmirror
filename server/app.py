@@ -2076,45 +2076,59 @@ def build_app(config: ConfigLoader) -> FastAPI:
             raise HTTPException(status_code=404, detail="chart not found")
         return {"deleted": True, "id": chart_id}
 
-    def _enforce_package_entitlement(device_id: str) -> None:
+    def _entitlement_scope_key(
+        device_id: str = "", *, request: Optional[Request] = None, user_id: str = ""
+    ) -> str:
+        """Prefer logged-in user key ``user:<id>``; else device_id."""
+        uid = (user_id or "").strip()
+        if not uid and request is not None:
+            uid = _optional_user_id(request)
+        if uid:
+            return f"user:{uid}"
+        return (device_id or "").strip()
+
+    def _enforce_package_entitlement(
+        device_id: str, *, request: Optional[Request] = None
+    ) -> None:
         """Gate 命书交付包 export:校验 can_export_package,非 pro 扣 1 次;无权益→402。
 
         demo 样例包(/product/demo-charts/{id}/package)与在线阅读(/bazi/report)不经过此闸门。
-        anonymous device_id 模型:抬高门槛(挡随手 curl),非密码学强执行。
+        登录用户走 user:<id> 权益键；匿名走 device_id。
         """
         if _product_store is None:
             return  # store 未配置(最小部署)→ 信誉制,不阻拦
-        did = (device_id or "").strip()
-        if not did:
-            raise HTTPException(status_code=402, detail="导出需设备标识,请刷新页面后重试")
-        ent = _product_store.get_entitlement(did).to_dict()
+        key = _entitlement_scope_key(device_id, request=request)
+        if not key:
+            raise HTTPException(status_code=402, detail="导出需设备标识或登录,请刷新页面后重试")
+        ent = _product_store.get_entitlement(key).to_dict()
         if not ent.get("can_export_package"):
             _product_store.track(
-                "package_export_blocked", device_id=did, props={"reason": "no_entitlement"}
+                "package_export_blocked", device_id=key, props={"reason": "no_entitlement"}
             )
             raise HTTPException(
                 status_code=402,
                 detail="完整命书交付包需开通套餐或购买次数,请前往「套餐」页",
             )
         if ent.get("plan") != "pro":
-            result = _product_store.consume_credit(did)
+            result = _product_store.consume_credit(key)
             if not result.get("ok"):
                 _product_store.track(
-                    "package_export_blocked", device_id=did, props={"reason": result.get("reason")}
+                    "package_export_blocked", device_id=key, props={"reason": result.get("reason")}
                 )
                 raise HTTPException(status_code=402, detail="交付包次数已用尽,请前往「套餐」页")
             _product_store.track(
-                "package_export", device_id=did, props={"reason": result.get("reason")}
+                "package_export", device_id=key, props={"reason": result.get("reason")}
             )
 
     @app.post("/api/v1/charts/{chart_id}/export/package")
     async def export_chart_package(
+        request: Request,
         chart_id: str,
         device_id: str = "",
         req: PackageExportOptions = PackageExportOptions(),
     ) -> Dict[str, Any]:
         """Standard product package: 命书 markdown + HTML (print to PDF) + 择日."""
-        _enforce_package_entitlement(device_id)
+        _enforce_package_entitlement(device_id, request=request)
         opts = req
         if _chart_store is None:
             # Allow legacy bazi-as-id without store for export
@@ -2160,11 +2174,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
     @app.post("/api/v1/bazi/export/package")
     async def export_bazi_package(
+        request: Request,
         req: BaziPackageExportRequest,
         device_id: str = "",
     ) -> Dict[str, Any]:
         """Export product package from raw birth/bazi payload (no UUID required)."""
-        _enforce_package_entitlement(device_id)
+        _enforce_package_entitlement(device_id, request=request)
         from tools.bazi_ai.report_export import build_product_package
 
         try:
@@ -2319,7 +2334,9 @@ def build_app(config: ConfigLoader) -> FastAPI:
         return {"ok": True, "entitlement": rec.to_dict()}
 
     @app.post("/api/v1/product/checkout")
-    async def product_checkout(req: CheckoutRequest) -> Dict[str, Any]:
+    async def product_checkout(
+        request: Request, req: CheckoutRequest
+    ) -> Dict[str, Any]:
         """Closed-loop checkout (demo provider): ledger + entitlement.
 
         Production adapters should create a pending order with the PSP and
@@ -2328,9 +2345,9 @@ def build_app(config: ConfigLoader) -> FastAPI:
         """
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        device_id = (req.device_id or "").strip()
+        device_id = _entitlement_scope_key(req.device_id, request=request)
         if not device_id:
-            raise HTTPException(status_code=400, detail="device_id required")
+            raise HTTPException(status_code=400, detail="device_id or login required")
         product = (req.product or "pro").strip().lower()
         if product not in (
             "pro",
@@ -2458,21 +2475,29 @@ def build_app(config: ConfigLoader) -> FastAPI:
         }
 
     @app.get("/api/v1/product/entitlement")
-    async def product_get_entitlement(device_id: str) -> Dict[str, Any]:
+    async def product_get_entitlement(
+        request: Request, device_id: str = ""
+    ) -> Dict[str, Any]:
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        if not (device_id or "").strip():
-            raise HTTPException(status_code=400, detail="device_id required")
-        return _product_store.get_entitlement(device_id.strip()).to_dict()
+        key = _entitlement_scope_key(device_id, request=request)
+        if not key:
+            raise HTTPException(status_code=400, detail="device_id or login required")
+        data = _product_store.get_entitlement(key).to_dict()
+        data["scope_key"] = key
+        data["scoped_by"] = "user" if key.startswith("user:") else "device"
+        return data
 
     @app.post("/api/v1/product/entitlement/activate")
-    async def product_activate(req: EntitlementActivateRequest) -> Dict[str, Any]:
+    async def product_activate(
+        request: Request, req: EntitlementActivateRequest
+    ) -> Dict[str, Any]:
         """Demo activation. Production: replace with payment webhook."""
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        device_id = (req.device_id or "").strip()
-        if not device_id:
-            raise HTTPException(status_code=400, detail="device_id required")
+        key = _entitlement_scope_key(req.device_id, request=request)
+        if not key:
+            raise HTTPException(status_code=400, detail="device_id or login required")
         action = (req.action or "pro").strip().lower()
         code = (req.code or "").strip()
         # Allow empty code only for credit; pro requires demo code
@@ -2482,11 +2507,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
                     status_code=403,
                     detail="invalid activation code",
                 )
-            rec = _product_store.activate_pro(device_id, days=max(1, min(req.days, 365)))
+            rec = _product_store.activate_pro(key, days=max(1, min(req.days, 365)))
             _product_store.track(
-                "pro_activated", device_id=device_id, props={"days": req.days}
+                "pro_activated", device_id=key, props={"days": req.days}
             )
-            return {"ok": True, "entitlement": rec.to_dict()}
+            return {"ok": True, "entitlement": rec.to_dict(), "scope_key": key}
         if action == "credit":
             # Production requires demo/activation code; empty only allowed in dev.
             if _is_production:
@@ -2496,33 +2521,35 @@ def build_app(config: ConfigLoader) -> FastAPI:
                     )
             elif code and code != _demo_code:
                 raise HTTPException(status_code=403, detail="invalid activation code")
-            rec = _product_store.add_credits(device_id, n=max(1, min(req.credits, 20)))
+            rec = _product_store.add_credits(key, n=max(1, min(req.credits, 20)))
             _product_store.track(
                 "credit_purchased",
-                device_id=device_id,
+                device_id=key,
                 props={"credits": req.credits},
             )
-            return {"ok": True, "entitlement": rec.to_dict()}
+            return {"ok": True, "entitlement": rec.to_dict(), "scope_key": key}
         raise HTTPException(status_code=400, detail="action must be pro or credit")
 
     @app.post("/api/v1/product/entitlement/consume")
-    async def product_consume(req: EntitlementConsumeRequest) -> Dict[str, Any]:
+    async def product_consume(
+        request: Request, req: EntitlementConsumeRequest
+    ) -> Dict[str, Any]:
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        device_id = (req.device_id or "").strip()
-        if not device_id:
-            raise HTTPException(status_code=400, detail="device_id required")
-        result = _product_store.consume_credit(device_id)
+        key = _entitlement_scope_key(req.device_id, request=request)
+        if not key:
+            raise HTTPException(status_code=400, detail="device_id or login required")
+        result = _product_store.consume_credit(key)
         if result.get("ok"):
             _product_store.track(
                 "package_export",
-                device_id=device_id,
+                device_id=key,
                 props={"reason": result.get("reason")},
             )
         else:
             _product_store.track(
                 "package_export_blocked",
-                device_id=device_id,
+                device_id=key,
                 props={"reason": result.get("reason")},
             )
         return result

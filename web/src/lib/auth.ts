@@ -12,6 +12,7 @@ export interface AuthUser {
   created_at?: number;
   updated_at?: number;
   is_active?: boolean;
+  email_verified?: boolean;
 }
 
 export function getSessionToken(): string {
