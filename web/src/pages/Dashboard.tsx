@@ -9,7 +9,8 @@ import {
   Settings2,
   ChevronDown,
 } from "lucide-react";
-import { SealStamp, ErrorPanel } from "../components/ui";
+import { ErrorPanel } from "../components/ui";
+import Landing from "../components/Landing";
 import { useChart, type ChartInfo, type LocationInfo } from "../contexts/ChartContext";
 import { parseBazi } from "../lib/bazi";
 import {
@@ -122,6 +123,7 @@ export default function Dashboard() {
   const [timeUnknown, setTimeUnknown] = useState(false);
   const [gender, setGender] = useState(chart?.gender ?? "");
   const [calendarType, setCalendarType] = useState<"solar" | "lunar">(chart?.calendarType ?? "solar");
+  const [isLeapMonth, setIsLeapMonth] = useState(false);
 
   const [previewBazi, setPreviewBazi] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -160,7 +162,11 @@ export default function Dashboard() {
     setPreviewLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const result = await baziFromDatetime(`${date}T${time}`, calendarType);
+        const result = await baziFromDatetime(`${date}T${time}`, {
+          calendarType,
+          isLeapMonth: calendarType === "lunar" ? isLeapMonth : false,
+          longitude: calendarType === "solar" ? longitude : undefined,
+        });
         setPreviewBazi(result.bazi);
         setPreviewError(null);
       } catch (err) {
@@ -171,7 +177,17 @@ export default function Dashboard() {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [birthYear, birthMonth, birthDay, birthHour, birthMinute, calendarType, useManualBazi]);
+  }, [
+    birthYear,
+    birthMonth,
+    birthDay,
+    birthHour,
+    birthMinute,
+    calendarType,
+    isLeapMonth,
+    longitude,
+    useManualBazi,
+  ]);
   const [manualBazi, setManualBazi] = useState(chart?.bazi ?? "");
 
   const [deriving, setDeriving] = useState(false);
@@ -204,10 +220,11 @@ export default function Dashboard() {
       }
       setDeriving(true);
       try {
-        const result = await baziFromDatetime(
-          `${birthDate}T${birthTime}`,
-          calendarType
-        );
+        const result = await baziFromDatetime(`${birthDate}T${birthTime}`, {
+          calendarType,
+          isLeapMonth: calendarType === "lunar" ? isLeapMonth : false,
+          longitude: calendarType === "solar" ? longitude : undefined,
+        });
         bazi = result.bazi;
       } catch (err) {
         const message = err instanceof Error ? err.message : "八字推导失败";
@@ -357,23 +374,16 @@ export default function Dashboard() {
   return (
     <div className="relative mx-auto max-w-5xl space-y-6">
       {!chart && (
-        <section className="relative overflow-hidden rounded-2xl border border-vermilion/10 bg-gradient-to-br from-white/90 via-ink-100/90 to-white/90 px-5 py-5 text-center shadow-lg backdrop-blur-sm dark:border-vermilion/20 dark:from-ink-800/90 dark:via-ink-900/90 dark:to-ink-800/90 md:px-8">
-          <div className="pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full border border-vermilion/20 opacity-50 animate-orbit-slow" aria-hidden="true" />
-          <div className="pointer-events-none absolute -left-3 bottom-0 h-14 w-14 rounded-full border border-gold/20 opacity-50 animate-orbit-slow-reverse" aria-hidden="true" />
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(circle,rgba(201,162,39,0.08),transparent_60%)]" aria-hidden="true" />
-          <div className="relative mb-2 flex items-center justify-center gap-3">
-            <SealStamp size="sm" variant="vermilion">命镜</SealStamp>
-            <h1 className="font-display text-2xl text-ink-800 dark:text-ink-100 md:text-3xl">
-              生成你的命运数字孪生
-            </h1>
-          </div>
-          <p className="relative mx-auto max-w-2xl text-xs text-ink-600 dark:text-ink-300 md:text-sm">
-            输入出生时间、地点与性别，命镜将自动推导出八字，并为你构建可交互、可推演、可对比的个人命运模型。
-          </p>
-        </section>
+        <Landing
+          demos={demos}
+          onLoadDemo={loadDemo}
+          onStart={() =>
+            document.getElementById("bazi-form")?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
+        />
       )}
 
-      {demos.length > 0 && (
+      {chart && demos.length > 0 && (
         <section className="panel p-4 md:p-5">
           <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
             <div>
@@ -445,7 +455,7 @@ export default function Dashboard() {
       )}
 
       {(showForm || !chart) && (
-      <section className="panel p-4 md:p-5">
+      <section id="bazi-form" className="panel p-4 md:p-5">
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="form-group flex items-center gap-4">
             <label className="text-sm font-medium text-ink-600 dark:text-ink-300">
@@ -505,6 +515,17 @@ export default function Dashboard() {
                 visibleItems={3}
               />
             </div>
+            {calendarType === "lunar" && !useManualBazi && (
+              <label className="mt-2 inline-flex items-center gap-2 text-sm text-ink-600 dark:text-ink-300">
+                <input
+                  type="checkbox"
+                  checked={isLeapMonth}
+                  onChange={(e) => setIsLeapMonth(e.target.checked)}
+                  className="rounded border-ink-300"
+                />
+                闰月
+              </label>
+            )}
           </div>
 
           <div className="form-group">

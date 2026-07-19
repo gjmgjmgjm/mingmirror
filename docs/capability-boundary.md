@@ -51,7 +51,7 @@ block = format_product_block(surf)  # Markdown
 | `POST /api/v1/bazi/year-timing` | 零 LLM；body 含 `bazi/question/options/birth_*` |
 | `POST /api/v1/bazi/analyze` → `result.year_timing_surface` | 分析时自动注入（无 options 时仅「哪年…」开放式出 `trend_only`） |
 | `web` `YearTimingPanel` + `ChartBasic` | 展示 shortlist 表或趋势提示 |
-| `result.liuqin_dossier` / `LiuqinDossierPanel` | 父/母/配偶/子女/手足：性格·能力·健康·关系·双星合参（母印/父财/配偶官杀或财）·宫位合参·大运引动·流年象征取样（非单年断言） |
+| `result.liuqin_dossier` / `LiuqinDossierPanel` | 父/母/配偶/子女/手足：性格·能力·健康·关系·双星合参（母印/父财/配偶官杀或财/子女官杀或食伤/手足比劫）·宫位合参·大运引动·流年象征取样（非单年断言） |
 | `year_timing_surface.meta.liuqin_bridge` | 应期 shortlist 与六亲流年取样联动：重合年标注、UI 双向高亮；不作必在某年 |
 | `ReadingReport` `year_timing` section | 报告分区渲染 |
 | `web/src/api/client.ts` `fetchYearTiming` | 前端封装 |

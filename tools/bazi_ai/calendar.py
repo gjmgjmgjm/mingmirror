@@ -110,14 +110,24 @@ def month_pillar(d: date) -> str:
 
 
 def hour_pillar(dt: datetime) -> str:
-    """Return the hour pillar for a Gregorian datetime."""
+    """Return the hour pillar for a Gregorian datetime.
+
+    When late-子时归次日 is enabled, the day stem used for 五鼠遁 must match
+    the (possibly next-day) day pillar — not the civil calendar date alone.
+    """
     if _SXTWL_AVAILABLE:
+        # sxtwl.getShiGz already treats hour>=23 with next-day stem semantics.
         day = _sxtwl_day(dt.date())
         return _gz_to_pillar(sxtwl.getShiGz(day.getDayGZ().tg, dt.hour))
     hour = dt.hour
     branch_index = ((hour + 1) // 2) % 12
     branch = BRANCHES[branch_index]
-    day_stem = day_pillar(dt.date())[0]
+    day_date = dt.date()
+    if _ZI_HOUR_NEXT_DAY and hour >= 23:
+        from datetime import timedelta
+
+        day_date = day_date + timedelta(days=1)
+    day_stem = day_pillar(day_date)[0]
     day_stem_index = STEMS.index(day_stem)
     start_index = (day_stem_index % 5) * 2
     stem = STEMS[(start_index + branch_index) % 10]
@@ -300,7 +310,14 @@ def dayun_list(
 
     year_stem, month_pillar = pillars[0][0], pillars[1]
     birth_dt = solar_birth_datetime(birth_date, birth_time, calendar_type)
-    _male = gender in ("male", "男", "m", "M")
+    # Empty/unknown must NOT fall through as female (old bug: `in (...)` was False).
+    gender_norm = (gender or "").strip()
+    female_tokens = {"female", "女", "f", "F", "woman"}
+    if gender_norm in female_tokens:
+        _male = False
+    else:
+        # male / 男 / empty / unknown → male direction (safe default)
+        _male = True
 
     if birth_dt is None:
         start_years, start_months = 0, 0

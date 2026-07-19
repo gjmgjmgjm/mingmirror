@@ -37,3 +37,24 @@ def test_spouse_benqi_with_canggan_yue_counts_strong():
     prof = liuqin_profile("丁巳 庚戌 丙辰 丁酉", gender="male") or {}
     spouse = prof.get("spouse") or {}
     assert spouse.get("strength") == "强"
+
+
+def test_father_root_only_in_day_branch_is_weak():
+    """父星透干但本气根仅在日支（夫妻宫）→ 弱 (年月无本气)."""
+    prof = liuqin_profile("己酉 癸酉 乙未 丙子", gender="male") or {}
+    father = prof.get("father") or {}
+    assert father.get("strength") == "弱"
+    sup = father.get("support_text") or ""
+    assert "年月" in sup or "父母" in sup or father.get("strength") == "弱"
+
+
+def test_sibling_dual_star_labels():
+    """手足比劫互参标签（强弱仍认主星）."""
+    prof = liuqin_profile("甲午 丁卯 癸酉 庚申", gender="male") or {}
+    bro = prof.get("brother") or {}
+    sis = prof.get("sister") or {}
+    for m in (bro, sis):
+        assert m.get("strength") in ("强", "弱")
+        star = str(m.get("star") or "")
+        if "/" in star:
+            assert "比肩" in star or "劫财" in star

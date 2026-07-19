@@ -925,6 +925,7 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         # Effective strength (master-like binary, 中→弱 tightened).
         # 子女更严: 强必须透干+未坏根 (仅月令本气无透干 → 弱, 避免食伤「有根假强」).
         is_child = relation in ("儿子", "女儿", "子女")
+        is_father = relation in ("父亲",)
         if is_child:
             if intact_roots and has_stem:
                 strength = "强"
@@ -940,6 +941,15 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         # Consistency: all roots destroyed → never leave as 强
         if strength == "强" and has_branch_root and not intact_roots:
             strength = "弱"
+
+        # 父星: 真根宜落在年月（父母/祖上侧）。仅日时有本气/藏干根时，
+        # 财气偏入夫妻/子女宫，父缘按弱论（对齐杨炎若干 gold）。
+        if is_father and strength == "强":
+            ym_benqi = any(p in ("年支", "月支") for p in intact_benqi)
+            if not ym_benqi and not dedeling:
+                strength = "弱"
+                support_notes.append("根不在年月父母宫侧，父星作弱")
+                support_text = "、".join(support_notes)
 
         # 星被重度克泄→降级为弱(命理: 财被比劫夺 / 食伤被枭夺 / 官被食伤克).
         # 透干+本气真根时提高阈值, 避免官星透干有力却因全局火土多被误降.
@@ -1091,6 +1101,19 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         secondary_label="同参",
         merge_strength=False,
     )
+    # 手足双星: 比肩/劫财互参 — 标签合参，强弱只认主星
+    bro_primary = mapping["brother"]
+    sis_primary = mapping["sister"]
+    brother_merged = _merge_dual_star(
+        "兄弟", bro_primary, sis_primary,
+        secondary_label="同参",
+        merge_strength=False,
+    )
+    sister_merged = _merge_dual_star(
+        "姐妹", sis_primary, bro_primary,
+        secondary_label="同参",
+        merge_strength=False,
+    )
 
     result: Dict[str, Any] = {
         "gender": gender_key,
@@ -1100,8 +1123,8 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         "spouse": spouse_merged,
         "son": son_merged,
         "daughter": dau_merged,
-        "brother": _describe("兄弟", mapping["brother"]),
-        "sister": _describe("姐妹", mapping["sister"]),
+        "brother": brother_merged,
+        "sister": sister_merged,
         "palace_map": palace_map,
     }
 

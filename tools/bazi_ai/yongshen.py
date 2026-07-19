@@ -178,7 +178,21 @@ def resolve_yongshen(bazi: str) -> Dict[str, Any]:
     taboo: List[str] = []
     primary = "扶抑"
 
-    if extreme_season and tiaohou:
+    # 调候独胜:扶抑(帮身/克泄)与调候(穷通宝鉴)完全冲突(disjoint)时,以 cited
+    # 权威为准。否则扶抑在春/秋会盖过穷通宝鉴的调候用神(如庚金春秋月喜木火、
+    # 壬癸水秋月喜金),与 engine 自称的"对齐穷通宝鉴"不一致。
+    tiaohou_conflict = bool(tiaohou) and set(fuyi_u).isdisjoint(tiaohou)
+
+    if tiaohou_conflict:
+        primary = "调候"
+        useful.extend(sorted(tiaohou))
+        for el in tongguan:  # 通关若与调候不冲突仍可并入
+            if el not in useful and el not in tiaohou:
+                useful.append(el)
+        for el in fuyi_u:  # 冲突的扶抑帮身元素转为忌(与调候对立)
+            if el not in useful:
+                taboo.append(el)
+    elif extreme_season and tiaohou:
         # 调候优先
         primary = "调候"
         useful.extend(sorted(tiaohou))

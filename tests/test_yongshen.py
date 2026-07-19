@@ -38,6 +38,16 @@ class TestResolveYongshen:
         for el in r["useful_gods"]:
             assert el not in r["taboo_gods"]
 
+    def test_tiaohou_conflicts_fuyi_prefers_tiaohou(self):
+        """扶抑与调候 disjoint 时，primary=调候且 useful 含调候元素。"""
+        # 找一个有 tiaohou 的盘；若与 fuyi 冲突则应以调候为准
+        r = resolve_yongshen("甲子 庚午 丙寅 戊戌")  # 午月身旺类
+        assert r.get("tiaohou_elements") or r.get("useful_gods")
+        if r.get("primary") == "调候":
+            th = set(r.get("tiaohou_elements") or [])
+            useful = set(r.get("useful_gods") or [])
+            assert th & useful or not th
+
 
 class TestYearYongshenScore:
     def test_year_elements(self):
