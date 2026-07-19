@@ -487,6 +487,112 @@ class ProductStore:
             "credit_orders": int(row["credit_orders"] or 0),
         }
 
+    def create_pending_payment(
+        self,
+        *,
+        provider: str,
+        external_id: str,
+        device_id: str,
+        product: str,
+        amount_cents: int = 0,
+        currency: str = "CNY",
+        raw: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Insert pending ledger row (or return existing)."""
+        return self.record_payment(
+            provider=provider,
+            external_id=external_id,
+            device_id=device_id,
+            product=product,
+            amount_cents=amount_cents,
+            currency=currency,
+            status="pending",
+            raw=raw or {},
+        )
+
+    def fulfill_pending_or_new(
+        self,
+        *,
+        provider: str,
+        external_id: str,
+        device_id: str,
+        product: str,
+        amount_cents: int = 0,
+        currency: str = "CNY",
+        days: int = 30,
+        credits: int = 1,
+        raw: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Idempotent fulfill: record succeeded payment + apply entitlement."""
+        ledger = self.record_payment(
+            provider=provider,
+            external_id=external_id,
+            device_id=device_id,
+            product=product,
+            amount_cents=amount_cents,
+            currency=currency,
+            status="succeeded",
+            raw=raw or {},
+        )
+        # If first insert was pending with same key, UNIQUE blocks — handle update
+        if ledger.get("duplicate"):
+            existing = self.get_payment(provider=provider, external_id=external_id)
+            if existing and str(existing.get("status", "")).lower() in (
+                "succeeded",
+                "success",
+                "paid",
+                "complete",
+                "completed",
+            ):
+                ent = self.get_entitlement(
+                    str(existing.get("device_id") or device_id)
+                ).to_dict()
+                return {
+                    "ok": True,
+                    "duplicate": True,
+                    "payment_id": ledger.get("payment_id"),
+                    "entitlement": ent,
+                }
+            # Upgrade pending → succeeded (first real fulfill; not a duplicate)
+            self._conn.execute(
+                """
+                UPDATE payment_ledger
+                SET status = 'succeeded',
+                    device_id = ?,
+                    product = ?,
+                    amount_cents = ?,
+                    raw_json = ?
+                WHERE provider = ? AND external_id = ?
+                """,
+                (
+                    (device_id or "")[:128],
+                    (product or "")[:64],
+                    int(amount_cents or 0),
+                    json.dumps(raw or {}, ensure_ascii=False),
+                    (provider or "demo")[:32],
+                    (external_id or "")[:128],
+                ),
+            )
+            self._conn.commit()
+            ent_rec = self.apply_payment_product(
+                device_id, product, days=days, credits=credits
+            )
+            return {
+                "ok": True,
+                "duplicate": False,
+                "payment_id": ledger.get("payment_id"),
+                "entitlement": ent_rec.to_dict(),
+            }
+        ent_rec = self.apply_payment_product(
+            device_id, product, days=days, credits=credits
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "payment_id": ledger.get("payment_id"),
+            "entitlement": ent_rec.to_dict(),
+        }
+
     def checkout(
         self,
         *,
@@ -516,6 +622,47 @@ class ProductStore:
                 "subscription_pro",
                 "mingmirror_pro",
             ) else 1900
+
+        # Non-demo: pending order only (no entitlement until webhook)
+        if provider not in ("demo", "local", "test"):
+            try:
+                from server.payments import build_pending_checkout
+
+                pending = build_pending_checkout(
+                    provider=provider,
+                    device_id=device_id,
+                    product=product,
+                    amount_cents=amount_cents,
+                    currency=currency,
+                    days=days,
+                    credits=credits,
+                    external_id=ext,
+                )
+                self.create_pending_payment(
+                    provider=pending["provider"],
+                    external_id=pending["external_id"],
+                    device_id=device_id,
+                    product=product,
+                    amount_cents=amount_cents,
+                    currency=currency,
+                    raw=pending,
+                )
+                return {
+                    "ok": True,
+                    "mode": "pending",
+                    "provider": pending["provider"],
+                    "external_id": pending["external_id"],
+                    "status": "pending",
+                    "amount_cents": amount_cents,
+                    "currency": currency,
+                    "product": product,
+                    "checkout_url": pending.get("checkout_url") or "",
+                    "prepay": pending.get("prepay") or {},
+                    "duplicate": False,
+                }
+            except Exception:
+                # Fall through to demo immediate if adapter import fails
+                provider = "demo"
 
         ledger = self.record_payment(
             provider=provider,

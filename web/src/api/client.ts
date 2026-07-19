@@ -344,6 +344,52 @@ export function resetPassword(payload: {
   });
 }
 
+export function exportAccountData(): Promise<{
+  ok: boolean;
+  data: Record<string, unknown>;
+}> {
+  return fetchJson("/auth/export-data");
+}
+
+export function deleteAccount(payload: {
+  password?: string;
+  confirm?: string;
+}): Promise<{ ok: boolean; deleted?: boolean; user_id?: string }> {
+  return fetchJson("/auth/delete-account", {
+    method: "POST",
+    body: JSON.stringify({
+      password: payload.password || "",
+      confirm: payload.confirm || "DELETE",
+    }),
+  });
+}
+
+export function fetchOAuthAuthorize(
+  provider: string,
+  state?: string
+): Promise<{
+  ok: boolean;
+  provider: string;
+  authorize_url: string;
+  state: string;
+  ready: boolean;
+  redirect_uri?: string;
+  hint?: string | null;
+}> {
+  const q = state ? `?state=${encodeURIComponent(state)}` : "";
+  return fetchJson(`/auth/oauth/${encodeURIComponent(provider)}${q}`);
+}
+
+export function exchangeOAuthCode(
+  provider: string,
+  payload: { code: string; state?: string; device_id?: string }
+): Promise<AuthSessionResponse & { ok?: boolean; provider?: string }> {
+  return fetchJson(`/auth/oauth/${encodeURIComponent(provider)}/exchange`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchMyCharts(limit = 50): Promise<{
   user_id: string;
   count: number;

@@ -56,7 +56,13 @@ docker compose up --build -d
 | `MINGMIRROR_SMTP_HOST` | 空 | 邮件（验证/重置）；不配则 API 返回 token |
 | `MINGMIRROR_SMTP_PORT` | `587` | SMTP 端口 |
 | `MINGMIRROR_SMTP_USER` / `PASSWORD` / `FROM` | 空 | SMTP 凭证 |
-| `MINGMIRROR_PUBLIC_BASE_URL` | 空 | 邮件内链接前缀，如 `https://your.domain` |
+| `MINGMIRROR_PUBLIC_BASE_URL` | 空 | 邮件/支付/OAuth 回调前缀，如 `https://your.domain` |
+| `MINGMIRROR_WECHAT_MCH_ID` / `API_V3_KEY` / `APP_ID` | 空 | 微信支付（pending 下单 + webhook 归一） |
+| `MINGMIRROR_ALIPAY_APP_ID` / `PUBLIC_KEY` | 空 | 支付宝 |
+| `MINGMIRROR_STRIPE_WEBHOOK_SECRET` | 空 | Stripe 签名校验 |
+| `MINGMIRROR_WECHAT_OAUTH_APP_ID` / `SECRET` | 空 | 微信开放平台 OAuth |
+| `MINGMIRROR_APPLE_CLIENT_ID` / `TEAM_ID` / `KEY_ID` | 空 | Sign in with Apple |
+| `MINGMIRROR_OAUTH_STUB` | 空 | `1` 时 OAuth 换码走本地 stub（仅开发） |
 | `DEEPSEEK_API_KEY` | 空 | AI 章节；结构层无 key 也可导出 |
 | `DOUYIN_PATH` | `/app/Downloaded` | 数据目录（事件/命盘 SQLite） |
 
@@ -114,13 +120,20 @@ cd web && npm run build
 | GET | `/api/v1/product/entitlement?device_id=` | 查询权益 |
 | POST | `/api/v1/product/entitlement/activate` | 演示开通（code=demo-pro） |
 | POST | `/api/v1/product/entitlement/consume` | 消耗交付包次数 |
-| POST | `/api/v1/product/checkout` | **收银台闭环**（演示渠道：账本+权益） |
+| POST | `/api/v1/product/checkout` | 收银台：`demo` 即时履约；`wechat`/`alipay`/`stripe` 创建 pending |
 | GET | `/api/v1/product/payments?device_id=` | 用户订单列表 |
 | GET | `/api/v1/product/payment/status?provider=&external_id=` | 订单查询 |
-| POST | `/api/v1/product/payment/webhook` | 支付回调 → 权益（幂等） |
+| POST | `/api/v1/product/payment/webhook` | 支付回调（canonical JSON）→ 权益（幂等） |
+| POST | `/api/v1/product/payment/webhook/{provider}` | 微信/支付宝/Stripe 原生 payload 归一后履约 |
 | POST | `/api/v1/admin/entitlement/grant` | 运营手动授权（需 admin token） |
+| GET | `/api/v1/auth/export-data` | 导出个人数据（需登录） |
+| POST | `/api/v1/auth/delete-account` | 删除账号（`confirm=DELETE` + 密码） |
+| GET | `/api/v1/auth/oauth/{provider}` | OAuth 授权 URL |
+| POST | `/api/v1/auth/oauth/{provider}/exchange` | OAuth code 换会话 |
 
 ### 支付 webhook 示例
+
+**Canonical（任意渠道统一字段）：**
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/product/payment/webhook \
@@ -136,6 +149,24 @@ curl -X POST http://localhost:8000/api/v1/product/payment/webhook \
     "days": 30
   }'
 ```
+
+**微信风格（路径含 provider，attach JSON 带 device/product）：**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/product/payment/webhook/wechat \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: $MINGMIRROR_WEBHOOK_SECRET" \
+  -d '{
+    "resource": {
+      "out_trade_no": "wx_ord_1",
+      "trade_state": "SUCCESS",
+      "amount": {"total": 9900},
+      "attach": "{\"device_id\":\"dev-1\",\"product\":\"pro\"}"
+    }
+  }'
+```
+
+真实下单：`POST /checkout` 且 `provider=wechat|alipay|stripe` 时只写 **pending** 账本并返回 `checkout_url`/`prepay`；权益仅在 webhook 成功后 `fulfill_pending_or_new` 写入（幂等）。
 
 `product` 映射：`pro` / `pro_month` → 完整版；`package` / `credit` → 交付包次数。  
 同一 `(provider, external_id)` 重复投递不会重复加权益。

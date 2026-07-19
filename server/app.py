@@ -34,6 +34,12 @@ from server.auth_routes import register_auth_routes
 from server.concurrency import ConcurrencyHub, hub as _default_hub
 from server.jobs import JobManager, JobStatus
 from server.mailer import MailConfig, Mailer
+from server.oauth import OAuthConfig, build_authorize_url, exchange_code_stub
+from server.payments import (
+    PaymentConfig,
+    normalize_webhook_payload,
+    verify_stripe_signature,
+)
 from storage import FileManager
 from tools.qizheng.star_tables import resolve_dignity_table
 from utils.logger import setup_logger
@@ -2545,69 +2551,108 @@ def build_app(config: ConfigLoader) -> FastAPI:
         return {"payment": row, "entitlement": ent}
 
     @app.post("/api/v1/product/payment/webhook")
+    @app.post("/api/v1/product/payment/webhook/{provider}")
     async def payment_webhook(
-        request: Request, req: PaymentWebhookRequest
+        request: Request,
+        provider: str = "",
     ) -> Dict[str, Any]:
         """Payment provider webhook → entitlement.
 
-        Idempotent on (provider, external_id). Wire Stripe/LemonSqueezy/wechat
-        by mapping their payload into PaymentWebhookRequest in a thin adapter.
+        Accepts canonical JSON (PaymentWebhookRequest fields) or provider-native
+        WeChat / Alipay / Stripe payloads (normalized by server.payments).
+        Idempotent on (provider, external_id).
         """
         _require_webhook(request)
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        if (req.status or "succeeded").lower() not in (
+
+        raw_body = await request.body()
+        path_provider = (provider or "").strip().lower()
+        headers = {k: v for k, v in request.headers.items()}
+        pay_cfg = PaymentConfig.from_env()
+        if path_provider == "stripe":
+            if pay_cfg.stripe_webhook_secret:
+                sig = headers.get("stripe-signature") or headers.get("Stripe-Signature") or ""
+                if not verify_stripe_signature(
+                    raw_body, sig, pay_cfg.stripe_webhook_secret
+                ):
+                    raise HTTPException(status_code=401, detail="invalid stripe signature")
+
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            body = {}
+        if not body:
+            ctype = request.headers.get("content-type", "")
+            if "form" in ctype:
+                form = await request.form()
+                body = {k: form.get(k) for k in form.keys()}
+
+        # Prefer explicit canonical fields when present
+        if isinstance(body, dict) and body.get("external_id") and body.get("device_id"):
+            canon = {
+                "provider": body.get("provider") or path_provider or "demo",
+                "external_id": body.get("external_id"),
+                "device_id": body.get("device_id"),
+                "product": body.get("product") or "package",
+                "amount_cents": body.get("amount_cents") or 0,
+                "currency": body.get("currency") or "CNY",
+                "status": body.get("status") or "succeeded",
+                "days": body.get("days") or 30,
+                "credits": body.get("credits") or 1,
+                "raw": body.get("raw") or body,
+            }
+        else:
+            canon = normalize_webhook_payload(
+                path_provider or (body.get("provider") if isinstance(body, dict) else None) or "demo",
+                body if isinstance(body, dict) else {},
+                headers=headers,
+            )
+
+        if str(canon.get("status") or "succeeded").lower() not in (
             "succeeded",
             "success",
             "paid",
             "complete",
             "completed",
         ):
-            return {"ok": False, "reason": f"ignored status={req.status}"}
+            return {"ok": False, "reason": f"ignored status={canon.get('status')}"}
+
+        if not str(canon.get("external_id") or "").strip():
+            raise HTTPException(status_code=400, detail="external_id required")
+
         try:
-            ledger = _product_store.record_payment(
-                provider=req.provider,
-                external_id=req.external_id,
-                device_id=req.device_id,
-                product=req.product,
-                amount_cents=req.amount_cents,
-                currency=req.currency,
-                status=req.status,
-                raw=req.raw or req.model_dump(),
+            result = _product_store.fulfill_pending_or_new(
+                provider=str(canon.get("provider") or "demo"),
+                external_id=str(canon.get("external_id") or ""),
+                device_id=str(canon.get("device_id") or ""),
+                product=str(canon.get("product") or "package"),
+                amount_cents=int(canon.get("amount_cents") or 0),
+                currency=str(canon.get("currency") or "CNY"),
+                days=int(canon.get("days") or 30),
+                credits=int(canon.get("credits") or 1),
+                raw=canon.get("raw") if isinstance(canon.get("raw"), dict) else canon,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if ledger.get("duplicate"):
-            ent = _product_store.get_entitlement(req.device_id).to_dict()
-            return {
-                "ok": True,
-                "duplicate": True,
-                "payment_id": ledger.get("payment_id"),
-                "entitlement": ent,
-            }
-
-        ent_rec = _product_store.apply_payment_product(
-            req.device_id,
-            req.product,
-            days=max(1, min(req.days, 365)),
-            credits=max(1, min(req.credits, 50)),
-        )
         _product_store.track(
             "payment_webhook",
-            device_id=req.device_id,
+            device_id=str(canon.get("device_id") or ""),
             props={
-                "provider": req.provider,
-                "product": req.product,
-                "external_id": req.external_id,
-                "amount_cents": req.amount_cents,
+                "provider": canon.get("provider"),
+                "product": canon.get("product"),
+                "external_id": canon.get("external_id"),
+                "amount_cents": canon.get("amount_cents"),
             },
         )
         return {
-            "ok": True,
-            "duplicate": False,
-            "payment_id": ledger.get("payment_id"),
-            "entitlement": ent_rec.to_dict(),
+            "ok": bool(result.get("ok", True)),
+            "duplicate": bool(result.get("duplicate")),
+            "payment_id": result.get("payment_id"),
+            "entitlement": result.get("entitlement") or {},
+            "provider": canon.get("provider"),
+            "external_id": canon.get("external_id"),
         }
 
     @app.get("/api/v1/product/entitlement")

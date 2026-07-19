@@ -51,6 +51,22 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class DeleteAccountRequest(BaseModel):
+    """Hard-delete: confirm must be DELETE; password required for email accounts.
+
+    OAuth-only users (synthetic @oauth.local) may omit password when session is valid.
+    """
+
+    password: str = ""
+    confirm: str = Field(default="DELETE", description='Must be the literal "DELETE"')
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str = Field(..., min_length=1)
+    state: str = ""
+    device_id: str = ""
+
+
 def _bearer_token(authorization: Optional[str], x_token: Optional[str] = None) -> str:
     if x_token and x_token.strip():
         return x_token.strip()
@@ -279,13 +295,183 @@ def register_auth_routes(
             "token_type": "bearer",
         }
 
+    @app.get("/api/v1/auth/export-data")
+    async def auth_export_data(
+        authorization: Optional[str] = Header(default=None),
+        x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
+    ) -> Dict[str, Any]:
+        """Export account-owned personal data (no password hashes / full tokens)."""
+        user, _ = _user_from_request(authorization, x_session_token)
+        data = _store().export_user_data(user.id)
+        return {"ok": True, "data": data}
+
+    @app.post("/api/v1/auth/delete-account")
+    async def auth_delete_account(
+        req: DeleteAccountRequest,
+        authorization: Optional[str] = Header(default=None),
+        x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
+    ) -> Dict[str, Any]:
+        """Permanently delete account. Requires password + confirm=DELETE."""
+        if (req.confirm or "").strip() != "DELETE":
+            raise HTTPException(
+                status_code=400,
+                detail='confirm must be the literal string "DELETE"',
+            )
+        user, _ = _user_from_request(authorization, x_session_token)
+        pw = (req.password or "").strip()
+        oauth_only = (user.email or "").endswith("@oauth.local")
+        if not pw and not oauth_only:
+            raise HTTPException(
+                status_code=400,
+                detail="password required to delete email accounts",
+            )
+        try:
+            _store().delete_user(user.id, password=pw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "deleted": True, "user_id": user.id}
+
     @app.get("/api/v1/auth/oauth/{provider}")
-    async def auth_oauth_stub(provider: str) -> Dict[str, Any]:
-        """Placeholder for WeChat/Apple OAuth (not configured)."""
-        raise HTTPException(
-            status_code=501,
-            detail=(
-                f"OAuth provider '{provider}' not configured. "
-                "Use email register/login. Configure provider keys to enable."
+    async def auth_oauth_authorize(
+        provider: str,
+        state: str = "",
+    ) -> Dict[str, Any]:
+        """Return OAuth authorize URL (WeChat / Apple). Secrets via env."""
+        from server.oauth import OAuthConfig, build_authorize_url
+
+        try:
+            info = build_authorize_url(
+                provider, state=state, cfg=OAuthConfig.from_env()
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            **info,
+            "hint": (
+                None
+                if info.get("ready")
+                else "Provider keys not set; authorize_url is a scaffold. "
+                "Set MINGMIRROR_WECHAT_OAUTH_* / MINGMIRROR_APPLE_* and "
+                "MINGMIRROR_PUBLIC_BASE_URL."
             ),
-        )
+        }
+
+    @app.get("/api/v1/auth/oauth/{provider}/callback")
+    @app.post("/api/v1/auth/oauth/{provider}/callback")
+    async def auth_oauth_callback(
+        provider: str,
+        request: Request,
+        code: str = "",
+        state: str = "",
+        device_id: str = "",
+    ) -> Dict[str, Any]:
+        """OAuth redirect callback: exchange code → session.
+
+        Production needs real token exchange. With MINGMIRROR_OAUTH_STUB=1
+        a deterministic stub identity is issued for local tests.
+        """
+        from server.oauth import exchange_code_stub
+
+        # Accept code from query (GET) or JSON/form (POST)
+        if not code and request.method.upper() == "POST":
+            ctype = (request.headers.get("content-type") or "").lower()
+            if "json" in ctype:
+                try:
+                    body = await request.json()
+                    if isinstance(body, dict):
+                        code = str(body.get("code") or "")
+                        state = state or str(body.get("state") or "")
+                        device_id = device_id or str(body.get("device_id") or "")
+                except Exception:
+                    pass
+            else:
+                try:
+                    form = await request.form()
+                    code = str(form.get("code") or "")
+                    state = state or str(form.get("state") or "")
+                    device_id = device_id or str(form.get("device_id") or "")
+                except Exception:
+                    pass
+
+        if not code:
+            raise HTTPException(status_code=400, detail="code required")
+
+        try:
+            profile = exchange_code_stub(provider, code)
+        except ValueError as exc:
+            msg = str(exc)
+            status = 501 if "not configured" in msg or "not implemented" in msg else 400
+            raise HTTPException(status_code=status, detail=msg) from exc
+
+        store = _store()
+        try:
+            user, session = store.upsert_oauth_identity(
+                provider=str(profile.get("provider") or provider),
+                provider_user_id=str(profile.get("provider_user_id") or ""),
+                email=str(profile.get("email") or ""),
+                display_name=str(profile.get("display_name") or ""),
+                device_id=device_id or "",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if merge_entitlement and device_id:
+            try:
+                merge_entitlement(user.id, device_id.strip())
+            except Exception:
+                pass
+
+        return {
+            "ok": True,
+            "user": user.to_public(),
+            "token": session.token,
+            "expires_at": session.expires_at,
+            "token_type": "bearer",
+            "provider": profile.get("provider") or provider,
+            "state": state,
+            "stub": True,  # real exchange will set False when implemented
+        }
+
+    @app.post("/api/v1/auth/oauth/{provider}/exchange")
+    async def auth_oauth_exchange(
+        provider: str,
+        req: OAuthCallbackRequest,
+    ) -> Dict[str, Any]:
+        """SPA-friendly code exchange (same as callback, JSON body)."""
+        from server.oauth import exchange_code_stub
+
+        try:
+            profile = exchange_code_stub(provider, req.code)
+        except ValueError as exc:
+            msg = str(exc)
+            status = 501 if "not configured" in msg or "not implemented" in msg else 400
+            raise HTTPException(status_code=status, detail=msg) from exc
+
+        store = _store()
+        try:
+            user, session = store.upsert_oauth_identity(
+                provider=str(profile.get("provider") or provider),
+                provider_user_id=str(profile.get("provider_user_id") or ""),
+                email=str(profile.get("email") or ""),
+                display_name=str(profile.get("display_name") or ""),
+                device_id=req.device_id or "",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if merge_entitlement and req.device_id:
+            try:
+                merge_entitlement(user.id, req.device_id.strip())
+            except Exception:
+                pass
+
+        return {
+            "ok": True,
+            "user": user.to_public(),
+            "token": session.token,
+            "expires_at": session.expires_at,
+            "token_type": "bearer",
+            "provider": profile.get("provider") or provider,
+            "state": req.state,
+        }

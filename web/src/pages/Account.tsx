@@ -1,7 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  deleteAccount,
+  exportAccountData,
   fetchMyCharts,
+  fetchOAuthAuthorize,
   forgotPassword,
   requestEmailVerify,
   resetPassword,
@@ -10,7 +13,8 @@ import {
 import { PageHeader, SectionCard, ErrorPanel } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 import { useChart } from "../contexts/ChartContext";
-import { setSession, type AuthUser } from "../lib/auth";
+import { clearSession, setSession, type AuthUser } from "../lib/auth";
+import { getDeviceId } from "../lib/analytics";
 import { refreshEntitlementFromServer } from "../lib/entitlements";
 
 export default function Account() {
@@ -34,6 +38,8 @@ export default function Account() {
   const [myCharts, setMyCharts] = useState<
     Array<{ id: string; bazi: string; label?: string; birth_date?: string }>
   >([]);
+  const [deletePw, setDeletePw] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   // Deep-link from email: ?verify=token or ?reset=token
   useEffect(() => {
@@ -186,6 +192,88 @@ export default function Account() {
       setVerifyTok("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "验证失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onExportData = async () => {
+    setError(null);
+    setMsg(null);
+    setBusy(true);
+    try {
+      const res = await exportAccountData();
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mingmirror-export-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg("个人数据已导出为 JSON 文件");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "导出失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteAccount = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setMsg(null);
+    if (deleteConfirm.trim() !== "DELETE") {
+      setError('请在确认框输入大写 DELETE');
+      return;
+    }
+    if (
+      !window.confirm(
+        "确认永久删除账号？此操作不可恢复（会话、设备关联将被清除）。"
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteAccount({
+        password: deletePw,
+        confirm: "DELETE",
+      });
+      clearSession();
+      setMsg("账号已删除");
+      window.location.href = "/app/account";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onOAuth = async (provider: "wechat" | "apple") => {
+    setError(null);
+    setMsg(null);
+    setBusy(true);
+    try {
+      const res = await fetchOAuthAuthorize(provider);
+      if (!res.ready) {
+        setMsg(
+          res.hint ||
+            `${provider} OAuth 密钥未配置。可在服务端设置 MINGMIRROR_*_OAUTH_* 与 MINGMIRROR_PUBLIC_BASE_URL。`
+        );
+        // Still open scaffold URL for demo if present
+        if (res.authorize_url) {
+          window.open(res.authorize_url, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+      // Pass device_id via state for callback merge (server also accepts body)
+      const sep = res.authorize_url.includes("?") ? "&" : "?";
+      const url = `${res.authorize_url}${sep}device_hint=${encodeURIComponent(getDeviceId())}`;
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "OAuth 启动失败");
     } finally {
       setBusy(false);
     }
@@ -353,6 +441,52 @@ export default function Account() {
             </button>
           </form>
         </SectionCard>
+
+        <SectionCard title="隐私与数据">
+          <p className="mb-3 text-xs text-ink-500">
+            可导出账号元数据（不含密码哈希/完整会话令牌），或永久删除账号。
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onExportData()}
+              className="rounded-xl border border-jade/40 px-4 py-2 text-sm text-jade hover:bg-jade/10 disabled:opacity-50"
+            >
+              导出我的数据
+            </button>
+          </div>
+          <form
+            onSubmit={onDeleteAccount}
+            className="space-y-3 rounded-xl border border-red-300/50 bg-red-50/40 p-3 dark:border-red-800/40 dark:bg-red-950/20"
+          >
+            <p className="text-xs font-medium text-red-700 dark:text-red-300">
+              危险区 · 删除账号
+            </p>
+            <input
+              type="password"
+              placeholder="当前密码（邮箱账号必填）"
+              value={deletePw}
+              onChange={(e) => setDeletePw(e.target.value)}
+              className="w-full rounded-xl border border-ink-300 bg-white px-3 py-2 text-sm dark:border-ink-600 dark:bg-ink-900"
+            />
+            <input
+              type="text"
+              placeholder='输入 DELETE 确认'
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              className="w-full rounded-xl border border-ink-300 bg-white px-3 py-2 font-mono text-sm dark:border-ink-600 dark:bg-ink-900"
+              required
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              永久删除账号
+            </button>
+          </form>
+        </SectionCard>
       </div>
     );
   }
@@ -398,6 +532,27 @@ export default function Account() {
             </button>
           ))}
         </div>
+
+        {mode === "login" && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onOAuth("wechat")}
+              className="rounded-xl border border-ink-300 px-3 py-1.5 text-xs hover:bg-ink-100 disabled:opacity-50 dark:border-ink-600 dark:hover:bg-ink-800"
+            >
+              微信登录（需配置）
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onOAuth("apple")}
+              className="rounded-xl border border-ink-300 px-3 py-1.5 text-xs hover:bg-ink-100 disabled:opacity-50 dark:border-ink-600 dark:hover:bg-ink-800"
+            >
+              Apple 登录（需配置）
+            </button>
+          </div>
+        )}
 
         {mode === "forgot" ? (
           <div className="space-y-4">

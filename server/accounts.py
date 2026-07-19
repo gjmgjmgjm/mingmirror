@@ -368,6 +368,166 @@ class AccountStore:
         """Stable key for ProductStore entitlement rows owned by a user."""
         return f"user:{user_id}"
 
+    def export_user_data(self, user_id: str) -> Dict[str, Any]:
+        """GDPR-style export of account-owned rows (no password hash)."""
+        user = self.get_user(user_id)
+        if user is None:
+            raise ValueError("user not found")
+        devices = self.devices_for_user(user_id)
+        sessions = self._conn.execute(
+            """
+            SELECT token, device_id, expires_at, created_at FROM account_session
+            WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
+            """,
+            (user_id,),
+        ).fetchall()
+        # Redact tokens in export — only metadata
+        session_meta = [
+            {
+                "device_id": r["device_id"],
+                "expires_at": r["expires_at"],
+                "created_at": r["created_at"],
+                "token_suffix": (r["token"] or "")[-6:],
+            }
+            for r in sessions
+        ]
+        oauth_links: list = []
+        try:
+            self._ensure_oauth_table()
+            rows = self._conn.execute(
+                """
+                SELECT provider, provider_user_id, created_at
+                FROM account_oauth WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchall()
+            oauth_links = [
+                {
+                    "provider": r["provider"],
+                    "provider_user_id": r["provider_user_id"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        except sqlite3.OperationalError:
+            pass
+        return {
+            "exported_at": _now(),
+            "user": user.to_public(),
+            "devices": devices,
+            "sessions": session_meta,
+            "oauth_identities": oauth_links,
+            "entitlement_scope": self.entitlement_key(user_id),
+        }
+
+    def delete_user(self, user_id: str, *, password: str = "") -> None:
+        """Hard-delete account (sessions, devices, tokens). Optional password check."""
+        row = self._conn.execute(
+            "SELECT password_hash FROM account_user WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("user not found")
+        if password and not verify_password(password, row["password_hash"]):
+            raise ValueError("invalid password")
+        self._conn.execute("DELETE FROM account_session WHERE user_id = ?", (user_id,))
+        self._conn.execute("DELETE FROM account_device WHERE user_id = ?", (user_id,))
+        self._conn.execute("DELETE FROM account_token WHERE user_id = ?", (user_id,))
+        self._conn.execute("DELETE FROM account_user WHERE id = ?", (user_id,))
+        # OAuth links if present
+        try:
+            self._conn.execute("DELETE FROM account_oauth WHERE user_id = ?", (user_id,))
+        except sqlite3.OperationalError:
+            pass
+        self._conn.commit()
+
+    def upsert_oauth_identity(
+        self,
+        *,
+        provider: str,
+        provider_user_id: str,
+        email: str = "",
+        display_name: str = "",
+        device_id: str = "",
+    ) -> tuple[UserRecord, SessionRecord]:
+        """Link or create user from OAuth identity."""
+        provider = (provider or "").strip().lower()
+        pid = (provider_user_id or "").strip()
+        if not provider or not pid:
+            raise ValueError("provider and provider_user_id required")
+        self._ensure_oauth_table()
+        row = self._conn.execute(
+            """
+            SELECT user_id FROM account_oauth
+            WHERE provider = ? AND provider_user_id = ?
+            """,
+            (provider, pid),
+        ).fetchone()
+        now = _now()
+        if row:
+            user = self.get_user(row["user_id"])
+            if user is None or not user.is_active:
+                raise ValueError("linked user inactive")
+            session = self.create_session(user.id, device_id=device_id)
+            if device_id:
+                self.link_device(user.id, device_id)
+            return user, session
+
+        # New user: prefer email if valid, else synthetic
+        try:
+            em = validate_email(email) if email else ""
+        except ValueError:
+            em = ""
+        if not em:
+            em = f"{provider}_{pid[:24]}@oauth.local"
+        # If email already registered, link oauth to that user
+        existing = self._conn.execute(
+            "SELECT id FROM account_user WHERE email = ?", (em,)
+        ).fetchone()
+        if existing:
+            uid = existing["id"]
+        else:
+            uid = uuid.uuid4().hex
+            name = (display_name or em.split("@")[0] or provider)[:64]
+            # Random unusable password for OAuth-only accounts
+            pw = hash_password(secrets.token_urlsafe(24))
+            self._conn.execute(
+                """
+                INSERT INTO account_user
+                (id, email, password_hash, display_name, created_at, updated_at,
+                 is_active, email_verified)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (uid, em, pw, name, now, now, 1 if email else 0),
+            )
+        self._conn.execute(
+            """
+            INSERT INTO account_oauth (provider, provider_user_id, user_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (provider, pid, uid, now),
+        )
+        self._conn.commit()
+        user = self.get_user(uid)
+        assert user is not None
+        session = self.create_session(uid, device_id=device_id)
+        if device_id:
+            self.link_device(uid, device_id)
+        return user, session
+
+    def _ensure_oauth_table(self) -> None:
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_oauth (
+                provider TEXT NOT NULL,
+                provider_user_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (provider, provider_user_id)
+            )
+            """
+        )
+        self._conn.commit()
+
     # ------------------------------------------------------------------
     # Email verify + password reset (token flow; SMTP optional later)
     # ------------------------------------------------------------------
