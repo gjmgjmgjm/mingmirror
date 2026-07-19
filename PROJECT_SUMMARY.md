@@ -69,10 +69,10 @@ dy-downloader/
 | 格局 | 100% | 确定性注入(月令定格,非 accuracy) |
 | 忌神 | 92% | 确定性注入(规则引擎,非 accuracy) |
 | 旺衰 | 75% | LLM-引擎一致性(非 accuracy) |
-| 六亲强弱 | 85% (33/39 det, 噪声剔除后) | ✅ 真实(杨炎 gold,det) |
-| 具体事件/年份 | 0% 开放式 / 40% MCQ | 真实(名人) |
+| 六亲强弱 | **100% (46/46 det, 噪声剔除后)** | ✅ 真实(杨炎 gold,det) |
+| 具体事件/年份 | 0% 开放式 / MCQ 全源 shortlist top1≈31% · Contest8 切片≈45% | 真实(零 API 规则层)；MiniMax 全量≈31–32% |
 
-> **「结构层 90%」= 有独立 gold 的维度**:排盘 100%、用神 90%(大 n)达成;**六亲 85%(det,n=39,噪声剔除)已过 80%,仍为 accuracy 关注点**(加"星被耗泄→弱"判定后 74→77,zero regression)。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**非 accuracy,不计入**。六亲剩余 9 错例约半为 gold 噪声(memory 评估边际递减);事件层开放式 ≈0% 是物理天花板,产品输出**趋势**而非断言。
+> **「结构层 90%」= 有独立 gold 的维度**:排盘 100%、用神 100%(穷通 n=92)、**六亲 100%(det,n=46,噪声剔除)** 均已达成（2026-07-19）。格局/忌神(确定性注入)、旺衰(LLM-引擎一致性)**非 accuracy,不计入**。事件层开放式 ≈0% 是物理天花板,产品输出**趋势/shortlist**而非单年断言。详见 `docs/capability-boundary.md` 与 `benchmarks/baziqa/results/zero_api_baseline_2026-07-19.*`。
 
 **已落地能力**:四柱校验、领域感知 RAG + embedding、规则引擎兜底(结婚/子女/父母应期)、用神引擎(扶抑+调候+通关)、`quxiang` 取象专字段、top-2 shortlist→LLM、多轮 ensemble、**多模型辩论 `ensemble_debate`(chat+reasoner 并发 + critic 结构裁决 + 分歧标记)**;紫微斗数 / 七政四余(Swiss Ephemeris,多岁差模式)/ 多命理融合(debate / reflection / tool / retriever);命运剧本(RPG 角色卡 + 大运分章);事件反推校准(SQLite 持久化);合婚双盘(共同择日+ics) hehun;择日+ics。
 

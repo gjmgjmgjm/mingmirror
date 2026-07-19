@@ -27,6 +27,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# When executed as ``python tools/bazi_ai/baziqa_eval.py``, sys.path[0] is
+# ``tools/bazi_ai`` which shadows the stdlib ``calendar`` module with
+# ``tools.bazi_ai.calendar``. Fix path before any third-party imports.
+_ROOT = Path(__file__).resolve().parents[2]
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if sys.path and sys.path[0] in ("", _SCRIPT_DIR):
+    sys.path[0] = str(_ROOT)
+elif str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+# Drop any lingering local package shadow of stdlib calendar.
+if "calendar" in sys.modules and not getattr(
+    sys.modules["calendar"], "__file__", ""
+).endswith(f"{os.sep}calendar.py"):
+    pass
+elif "calendar" in sys.modules:
+    _cal_file = str(getattr(sys.modules["calendar"], "__file__", "") or "")
+    if "bazi_ai" in _cal_file or "qizheng" in _cal_file:
+        del sys.modules["calendar"]
+
 import yaml
 
 try:
@@ -35,7 +54,8 @@ except ImportError:  # pragma: no cover
     aiohttp = None  # type: ignore[assignment]
 
 from control import RateLimiter
-from tools.bazi_ai import bazi_structural, calendar
+from tools.bazi_ai import bazi_structural
+from tools.bazi_ai import calendar as bazi_calendar
 from tools.bazi_ai.bazi_validator import normalize_bazi
 from tools.bazi_ai.engine import retrieve_similar_cases
 from tools.bazi_ai.knowledge_retriever import retrieve_knowledge_snippets
@@ -45,8 +65,12 @@ from tools.bazi_ai.rule_reasoner import (
     arbitrate_shortlist,
     format_domain_hint_block,
     format_shortlist_block,
+    prefer_shortlist_after_llm,
     rank_year_candidates,
 )
+
+# Alias used throughout this module (was ``calendar``).
+calendar = bazi_calendar
 
 _BAZIQA_DATA_URL = "https://github.com/ChenJiangxi/BaziQA/archive/refs/heads/main.zip"
 
@@ -130,6 +154,19 @@ def _format_options(options: List[str]) -> str:
     return "\n".join(f"{labels[i]}. {opt}" for i, opt in enumerate(options))
 
 
+def _strip_model_thinking(text: str) -> str:
+    """Remove MiniMax/M-series ``<think>…</think>`` blocks; keep final answer text."""
+    if not text:
+        return ""
+    # Prefer content *after* the last closed think block.
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[-1]
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    # Unclosed think dump: drop everything from the open tag.
+    text = re.sub(r"<think>[\s\S]*$", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def _extract_answer(text: str, max_label: str = "E") -> Optional[str]:
     """Extract the answer letter from *text*.
 
@@ -138,13 +175,22 @@ def _extract_answer(text: str, max_label: str = "E") -> Optional[str]:
     """
     if not text:
         return None
-    text_upper = text.upper()
+    cleaned = _strip_model_thinking(text)
+    # Search cleaned first, then full text (some models put 答案 inside think).
+    for blob in (cleaned, text):
+        if not blob:
+            continue
+        text_upper = blob.upper()
+        label_range = f"[A-{max_label}]"
+        explicit = re.search(rf"(?:答案|ANSWER)[:：]\s*({label_range})", text_upper)
+        if explicit:
+            return explicit.group(1)
+        # Prefer last explicit 答案 if multiple
+        all_ans = re.findall(rf"(?:答案|ANSWER)[:：]\s*({label_range})", text_upper)
+        if all_ans:
+            return all_ans[-1]
+    text_upper = (cleaned or text).upper()
     label_range = f"[A-{max_label}]"
-    # Prefer explicit answer line (answers may appear inside reasoning otherwise).
-    explicit = re.search(rf"(?:答案|ANSWER)[:：]\s*({label_range})", text_upper)
-    if explicit:
-        return explicit.group(1)
-    # Fallback: isolated option letter, but avoid matching inside option labels like "A.".
     match = re.search(rf"\b({label_range})\b", text_upper)
     if match:
         return match.group(1)
@@ -184,12 +230,17 @@ async def _call_llm(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
-    temperature: float = 0.2,
+    temperature: float = 0.0,
     max_tokens: int = 3000,
     timeout_seconds: float = 60.0,
 ) -> str:
     """Lightweight LLM call returning raw text."""
-    key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DOUYIN_BAZI_AI_API_KEY")
+    key = (
+        api_key
+        or os.environ.get("MINIMAX_API_KEY")
+        or os.environ.get("DOUYIN_BAZI_AI_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
+    )
     if not key:
         raise RuntimeError("No API key configured for BaziQA evaluation")
     if aiohttp is None:  # pragma: no cover
@@ -197,11 +248,18 @@ async def _call_llm(
 
     base = (
         base_url
-        or os.environ.get("DEEPSEEK_BASE_URL")
+        or os.environ.get("MINIMAX_BASE_URL")
         or os.environ.get("DOUYIN_BAZI_AI_BASE_URL")
+        or os.environ.get("DEEPSEEK_BASE_URL")
         or "https://api.deepseek.com/v1"
     ).rstrip("/")
-    mdl = model or os.environ.get("DEEPSEEK_MODEL") or os.environ.get("DOUYIN_BAZI_AI_MODEL") or "deepseek-chat"
+    mdl = (
+        model
+        or os.environ.get("MINIMAX_MODEL")
+        or os.environ.get("DOUYIN_BAZI_AI_MODEL")
+        or os.environ.get("DEEPSEEK_MODEL")
+        or "deepseek-chat"
+    )
 
     # Kimi API only accepts temperature=1 for some models.
     effective_temperature = temperature
@@ -215,6 +273,12 @@ async def _call_llm(
                 file=sys.stderr,
             )
 
+    # MiniMax M-series spends many tokens on internal thinking; budget extra.
+    mdl_l = mdl.lower()
+    effective_max_tokens = max_tokens
+    if any(x in mdl_l for x in ("minimax-m", "m2.", "m3")) and max_tokens < 2500:
+        effective_max_tokens = 3000
+
     payload = {
         "model": mdl,
         "messages": [
@@ -222,7 +286,7 @@ async def _call_llm(
             {"role": "user", "content": user_prompt},
         ],
         "temperature": effective_temperature,
-        "max_tokens": max_tokens,
+        "max_tokens": effective_max_tokens,
     }
 
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
@@ -238,7 +302,12 @@ async def _call_llm(
             resp.raise_for_status()
             data = await resp.json()
             message = data["choices"][0]["message"]
-            return message.get("content") or message.get("reasoning_content") or ""
+            content = message.get("content") or ""
+            reasoning = message.get("reasoning_content") or ""
+            # Prefer final content; append reasoning only if content empty.
+            if content.strip():
+                return content
+            return reasoning or content
 
 
 _DOMAIN_KEYWORDS = {
@@ -264,10 +333,11 @@ _DOMAIN_LABELS = {
 
 _DOMAIN_FOCUS = {
     "career": (
-        "本题问事业/职业。先判结构再对选项："
+        "本题问事业/职业。严格按十神组合映射选项，勿空猜："
         "①官杀+印→公职/机构/稳定岗；②食伤+财→技艺/创业/商贸；"
-        "③食伤泄秀无官→技术/自由/文艺；④比劫夺财→合伙/销售奔波。"
-        "再看大运流年是否引动官杀或食伤。"
+        "③食伤泄秀且官弱/无→技术/自由/文艺（禁止硬套公职）；"
+        "④比劫夺财→合伙/销售奔波；⑤有官无印→压力管理岗非清闲编制。"
+        "若上方有「选项措辞」升降权提示，优先对照，再结合大运是否引动官杀或食伤。"
     ),
     "wealth": (
         "本题问财运。身旺有财→能任财（小康至富）；身弱财重→难稳任、易起伏；"
@@ -278,12 +348,19 @@ _DOMAIN_FOCUS = {
         "大运流年是否加重失衡。忌神对应系统优先。"
     ),
     "marriage": (
-        "本题问婚姻/感情。重点看夫妻宫（日支）是否稳定、配偶星（男命正财/女命正官）是否清纯，"
-        "以及是否逢冲刑合害。"
+        "本题问婚姻/感情。按序取象："
+        "①夫妻宫（日支）逢冲刑害→波折/离异/多段关系权重大；"
+        "②配偶星（男正财/女正官杀）弱或不现→晚婚、助力弱、勿选「美满一世」；"
+        "③星有力且宫位稳→才支持稳定婚配；"
+        "④女命伤官见官、男命比劫夺财→感情是非加重。"
+        "把选项措辞（未婚/离异/再婚/稳定）映射到上述结构，勿空猜。"
     ),
     "kinship": (
-        "本题问六亲/家庭。重点看对应六亲的星（如偏财为父、正印为母、官杀为子女等）"
-        "落在哪一柱、是否受克，以及宫位引动。"
+        "本题问六亲/家庭。按星宫取象："
+        "①偏财看父、正印/偏印看母、官杀(男)/食伤(女)看子女；"
+        "②星透干有根→该亲缘有力可依；虚浮/坏根/不现→疏离、辛苦或助力薄；"
+        "③父母宫在月支、子女宫在时支，逢冲克则关系波折。"
+        "对照选项中「和睦/疏离/早年辛苦/经济支持」等措辞。"
     ),
     "education": (
         "本题问学业/学历。印星主文星：印透有根且身不太弱→学历偏高；"
@@ -677,7 +754,7 @@ async def evaluate_question(
     extra_cases_paths: Optional[List[Path]] = None,
     leave_one_out: bool = False,
     exclude_case_matcher: Optional[Callable[[Dict], bool]] = None,
-    temperature: float = 0.2,
+    temperature: float = 0.0,
     max_tokens: int = 3000,
     ensemble_runs: int = 1,
     rate_limiter: Optional[RateLimiter] = None,
@@ -776,9 +853,15 @@ async def evaluate_question(
                 }
                 for c in shortlist_objs
             ]
-        elif use_domain_hints:
+        else:
+            # Always-on: marriage/kinship + career/education structural hints.
+            # Wealth/health still gated by --domain-hints (noisier slice).
             domain_hint_block = format_domain_hint_block(
-                bazi, qtext, gender=gender
+                bazi,
+                qtext,
+                gender=gender,
+                include_career_wealth=use_domain_hints,
+                options=options,
             )
             if domain_hint_block:
                 shortlist_block = domain_hint_block
@@ -898,6 +981,15 @@ async def evaluate_question(
                             await _single_run(with_shortlist=bool(shortlist_block))
                         )
                     raw, vote_counts = _ensemble_vote(ensemble_raws, max_label=max_label)
+                    # One empty-answer retry (model sometimes returns prose without 答案：X).
+                    max_label_try = chr(ord("A") + len(options) - 1) if options else "E"
+                    if not _extract_answer(raw, max_label=max_label_try) and runs == 1:
+                        if rate_limiter is not None:
+                            await rate_limiter.acquire()
+                        retry_raw = await _single_run(with_shortlist=bool(shortlist_block))
+                        ensemble_raws.append(retry_raw)
+                        if _extract_answer(retry_raw, max_label=max_label_try):
+                            raw = retry_raw
     except Exception as exc:  # pragma: no cover - safety net for live API
         error = f"{type(exc).__name__}: {exc}"
 
@@ -905,6 +997,22 @@ async def evaluate_question(
     predicted = _extract_answer(raw, max_label=max_label) or ""
     if arbiter_meta and arbiter_meta.get("chosen"):
         predicted = arbiter_meta["chosen"]
+    # Soft shortlist post-process: when symbolic top-1 is strong and the model
+    # wandered, prefer the shortlist (zero extra API cost).
+    shortlist_override_meta: Optional[Dict[str, Any]] = None
+    if shortlist_objs and not rule_based and shortlist_mode != "off":
+        override, ov_reason = prefer_shortlist_after_llm(predicted, shortlist_objs)
+        if override and override != predicted:
+            shortlist_override_meta = {
+                "from": predicted,
+                "to": override,
+                "reason": ov_reason,
+            }
+            predicted = override
+            raw = (
+                f"推理：shortlist后处理覆盖（{ov_reason}，原模型{shortlist_override_meta['from']}）。\n"
+                f"答案：{override}"
+            )
     result: Dict[str, Any] = {
         "question_id": qid,
         "question": qtext,
@@ -921,6 +1029,8 @@ async def evaluate_question(
         result["rule_based"] = True
     if shortlist_meta:
         result["rule_shortlist"] = shortlist_meta
+    if shortlist_override_meta:
+        result["shortlist_override"] = shortlist_override_meta
     if arbiter_meta:
         result["shortlist_arbiter"] = arbiter_meta
     if ensemble_raws:
@@ -965,7 +1075,7 @@ async def run_evaluation(
     exclude_datasets: Optional[List[str]] = None,
     max_concurrency: int = 1,
     rate_limit: Optional[float] = None,
-    temperature: float = 0.2,
+    temperature: float = 0.0,
     max_tokens: int = 3000,
     ensemble_runs: int = 1,
     use_rule_reasoner: bool = True,
@@ -1151,7 +1261,7 @@ def main() -> None:
     parser.add_argument("--exclude-datasets", nargs="+", choices=["contest8", "celebrity50"], default=None, help="Exclude a whole dataset from RAG (cross-domain validation)")
     parser.add_argument("--concurrency", type=int, default=1, help="Concurrent API calls (default 1)")
     parser.add_argument("--rate-limit", type=float, default=None, help="Max API requests per second (e.g. 0.5)")
-    parser.add_argument("--temperature", type=float, default=0.2, help="LLM sampling temperature")
+    parser.add_argument("--temperature", type=float, default=0.0, help="LLM sampling temperature (0=greedy, lower variance)")
     parser.add_argument("--max-tokens", type=int, default=3000, help="Max tokens per LLM response")
     parser.add_argument("--ensemble-runs", type=int, default=1, help="Independent LLM calls per question for voting")
     parser.add_argument("--no-rule-reasoner", action="store_true", help="Disable symbolic rule reasoner")
@@ -1200,20 +1310,23 @@ def main() -> None:
     # the production config without editing config.yml.
     api_key = (
         args.api_key
-        or os.environ.get("DEEPSEEK_API_KEY")
+        or os.environ.get("MINIMAX_API_KEY")
         or os.environ.get("DOUYIN_BAZI_AI_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
         or config_api_key
     )
     base_url = (
         args.base_url
-        or os.environ.get("DEEPSEEK_BASE_URL")
+        or os.environ.get("MINIMAX_BASE_URL")
         or os.environ.get("DOUYIN_BAZI_AI_BASE_URL")
+        or os.environ.get("DEEPSEEK_BASE_URL")
         or config_base_url
     )
     model = (
         args.model
-        or os.environ.get("DEEPSEEK_MODEL")
+        or os.environ.get("MINIMAX_MODEL")
         or os.environ.get("DOUYIN_BAZI_AI_MODEL")
+        or os.environ.get("DEEPSEEK_MODEL")
         or config_model
     )
 

@@ -152,6 +152,7 @@
   - 在现有结果上复跑：触发次数 **14 → 3**（precision over recall），zhipu 上 3 次触发全部与 LLM 一致（确认而非覆盖，零副作用）。
   - 3 个回归测试（`tests/test_rule_reasoner.py`）全过；29 个 bazi_ai 相关测试全过。
 - **诚实结论**：star/palace 符号特征在该题集上 LOO **top-1 天花板 ≈36%**、**top-2 ≈56%**。仅靠符号引擎无法把年份题拉到高分；**真正的杠杆是把引擎 top-2 作为 shortlist 喂给 LLM**（gold 落在 top-2 内 ~56–75%，把 LLM 的 1/4 盲选提升到约 1/2）。这是 Phase 4 集成的方向，见下方 P5。
+- **2026-07-19 再标定**（`rule_calibrate_v2.py`，生产特征 + 坐标上升，无 sklearn）：Contest8 year-asking **n=44** full top1 **45.5%**、top2 **61.4%**；soft shortlist top2 **~69.6%**（fire≈23）。同日复跑：firerate 全量 top1 可到 50% 但 shortlist 触发过少 → **产品仍用 production 权重**。全源零 API（Contest8+MingLi+Celebrity50，n=186）top1 **30.6%**/top2 **51.1%**——名人题拉低均值，**不可用 Contest8 45% 外推**。Live MiniMax Contest8 n200 仍 ~31–32%。
 
 ### P5 — top-2 shortlist 喂 LLM（Phase 4）✅ 已完成（2026-07-13，当日迭代加固）
 - **做了什么**：

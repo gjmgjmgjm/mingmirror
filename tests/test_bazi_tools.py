@@ -6,21 +6,33 @@ from pathlib import Path
 import pytest
 
 from tools.bazi_corrector import build_replacer, correct_file, correct_text, load_glossary
-from tools.extract_bazi_and_tag_srt import (
-    BRANCHES,
-    HEADERS,
-    STEMS,
-    TEN_GODS,
-    _assemble_bazi,
-    clean_branch,
-    clean_stem,
-    infer_stem,
-    nearest_col,
-    parse_frame,
-    tag_srt,
-)
+
+# extract_bazi_and_tag_srt imports RapidOCR (onnxruntime) at module load.
+_HAS_OCR = True
+try:
+    from tools.extract_bazi_and_tag_srt import (  # noqa: E402
+        BRANCHES,
+        HEADERS,
+        STEMS,
+        TEN_GODS,
+        _assemble_bazi,
+        clean_branch,
+        clean_stem,
+        infer_stem,
+        nearest_col,
+        parse_frame,
+        tag_srt,
+    )
+except ImportError:
+    _HAS_OCR = False
+    BRANCHES = HEADERS = STEMS = TEN_GODS = ()  # type: ignore
+    _assemble_bazi = clean_branch = clean_stem = infer_stem = None  # type: ignore
+    nearest_col = parse_frame = tag_srt = None  # type: ignore
+
+requires_ocr = pytest.mark.skipif(not _HAS_OCR, reason="onnxruntime/rapidocr not installed")
 
 
+@requires_ocr
 class TestBaziConstants:
     """Sanity checks for bazi lookup tables."""
 
@@ -37,6 +49,7 @@ class TestBaziConstants:
         assert len(TEN_GODS) == 10
 
 
+@requires_ocr
 class TestInferStem:
     """Tests for infer_stem based on day stem and ten-god relationship."""
 
@@ -69,6 +82,7 @@ class TestInferStem:
         assert infer_stem("甲", "财神") is None
 
 
+@requires_ocr
 class TestCleanStem:
     """Tests for clean_stem OCR post-processing."""
 
@@ -84,6 +98,7 @@ class TestCleanStem:
         assert clean_stem(text) == expected
 
 
+@requires_ocr
 class TestCleanBranch:
     """Tests for clean_branch OCR post-processing."""
 
@@ -97,6 +112,7 @@ class TestCleanBranch:
         assert clean_branch(text) == expected
 
 
+@requires_ocr
 class TestNearestCol:
     """Tests for nearest_col helper."""
 
@@ -112,6 +128,7 @@ def _box(x, y, w=30, h=20):
     return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
 
 
+@requires_ocr
 class TestParseFrame:
     """Tests for parse_frame with mocked OCR output."""
 
@@ -161,6 +178,7 @@ class TestParseFrame:
         assert parsed["年柱"]["stem"]["甲"] == 1
 
 
+@requires_ocr
 class TestAssembleBazi:
     """Tests for _assemble_bazi."""
 
@@ -216,6 +234,7 @@ class TestAssembleBazi:
         assert _assemble_bazi(aggregated) is None
 
 
+@requires_ocr
 class TestTagSrt:
     """Tests for tag_srt."""
 
