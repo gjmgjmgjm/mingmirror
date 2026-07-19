@@ -52,6 +52,9 @@ class YearTimingCandidate:
     reasons: List[str] = field(default_factory=list)
     option_letter: str = ""
     option_text: str = ""
+    liuqin_overlap: bool = False
+    """True when structural year_critic prefers this candidate (soft, not unique truth)."""
+    critic_prefer: bool = False
 
 
 @dataclass
@@ -276,6 +279,9 @@ def resolve_year_timing(
                     if (c.option_letter or "").upper() == letter.upper():
                         if "结构 critic 偏好" not in c.reasons:
                             c.reasons = list(c.reasons or []) + ["结构 critic 偏好（并列参考）"]
+                        c.critic_prefer = True
+                        critic_meta["prefer_year"] = c.year
+                        critic_meta["prefer_letter"] = letter
                         break
         except Exception:
             critic_meta = {"reason": "critic_unavailable"}

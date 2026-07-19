@@ -352,6 +352,18 @@ export interface YearTimingCandidate {
   option_text?: string;
   /** True when year also appears in liuqin symbolic samples */
   liuqin_overlap?: boolean;
+  /** Soft structural critic preference — never means「必在此年」 */
+  critic_prefer?: boolean;
+}
+
+export interface StructuralCriticMeta {
+  letter?: string;
+  reason?: string;
+  picked_score?: number;
+  base_top1?: string;
+  assert_single_year?: boolean;
+  prefer_year?: number;
+  prefer_letter?: string;
 }
 
 export interface LiuqinYearBridgeSample {
@@ -387,6 +399,7 @@ export interface YearTimingSurface {
   disclaimer?: string;
   meta?: Record<string, unknown> & {
     liuqin_bridge?: LiuqinYearBridge;
+    structural_critic?: StructuralCriticMeta;
   };
 }
 

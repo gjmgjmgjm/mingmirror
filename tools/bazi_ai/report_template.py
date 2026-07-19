@@ -644,6 +644,10 @@ def build_report(
                     "disclaimer": yts.get("disclaimer"),
                     "candidates": cands,
                     "liuqin_bridge": bridge,
+                    "structural_critic": (yts.get("meta") or {}).get(
+                        "structural_critic"
+                    )
+                    or {},
                 },
             })
 

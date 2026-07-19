@@ -126,6 +126,38 @@ def test_structural_dual_star_father_and_spouse():
             assert m.get("exists") is True
 
 
+def test_structural_dual_star_children_guansha_or_shishang():
+    """子女: 男官杀互参 / 女食伤互参；强弱只认主星。"""
+    from tools.bazi_ai.bazi_structural import liuqin_profile
+
+    # male: son 七杀, daughter 正官
+    m = liuqin_profile("甲午 丁卯 癸酉 庚申", gender="male")
+    assert m is not None
+    son, dau = m["son"], m["daughter"]
+    for side, primary, secondary in (
+        (son, "七杀", "正官"),
+        (dau, "正官", "七杀"),
+    ):
+        star = str(side.get("star") or "")
+        if side.get("exists") and secondary:
+            # dual only when secondary also present in chart
+            if "/" in star:
+                assert primary in star and secondary in star
+        # strength must match primary-only describe (merge_strength=False)
+        # — if primary exists, strength is 强|弱 of primary domain
+        assert side.get("strength") in ("强", "弱")
+
+    # female: son 食神, daughter 伤官
+    f = liuqin_profile("丁未 戊申 癸亥 庚申", gender="female")
+    assert f is not None
+    fson, fdau = f["son"], f["daughter"]
+    for side in (fson, fdau):
+        assert side.get("strength") in ("强", "弱")
+        star = str(side.get("star") or "")
+        if "/" in star:
+            assert "食神" in star or "伤官" in star
+
+
 def test_year_timing_liuqin_bridge():
     from tools.bazi_ai.liuqin_dossier import build_liuqin_dossier
     from tools.bazi_ai.year_timing_surface import (

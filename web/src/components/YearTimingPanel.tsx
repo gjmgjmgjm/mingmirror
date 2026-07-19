@@ -38,6 +38,10 @@ export default function YearTimingPanel({
   const bridge = surface.meta?.liuqin_bridge;
   const bridgeSamples = bridge?.samples || [];
   const hasBridge = bridgeSamples.length > 0;
+  const critic = surface.meta?.structural_critic;
+  const criticLetter = (critic?.prefer_letter || critic?.letter || "").toUpperCase();
+  const criticYear = critic?.prefer_year;
+  const hasCritic = Boolean(criticLetter || criticYear);
 
   // Hide empty trend for generic questions with no year intent / no bridge.
   if (
@@ -69,7 +73,7 @@ export default function YearTimingPanel({
   return (
     <SectionCard
       title={
-        <span className="inline-flex items-center gap-2">
+        <span className="inline-flex flex-wrap items-center gap-2">
           {surface.product_title || "结构应期"}
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
@@ -81,6 +85,16 @@ export default function YearTimingPanel({
               六亲联动
             </span>
           ) : null}
+          {hasCritic ? (
+            <span
+              className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-400/40 dark:bg-violet-500/20 dark:text-violet-200"
+              title="大运/驿马结构 re-rank 偏好，仅并列参考，非唯一答案"
+            >
+              Critic
+              {criticLetter ? ` · ${criticLetter}` : ""}
+              {criticYear ? ` · ${criticYear}` : ""}
+            </span>
+          ) : null}
         </span>
       }
       delay={delay}
@@ -89,6 +103,21 @@ export default function YearTimingPanel({
         <p className="mb-3 text-sm leading-relaxed text-ink-600 dark:text-ink-300">
           {surface.product_copy}
         </p>
+      )}
+
+      {hasCritic && showTable && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-300/40 bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-100">
+          <span className="rounded-md bg-violet-600 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white dark:bg-violet-500">
+            Critic 偏好
+          </span>
+          <span className="font-semibold">
+            {criticLetter ? `选项 ${criticLetter}` : ""}
+            {criticYear ? ` · ${criticYear}年` : ""}
+          </span>
+          <span className="text-xs text-violet-700/80 dark:text-violet-200/80">
+            大运/驿马符号 re-rank · 仅并列参考 · 不作「必在此年」
+          </span>
+        </div>
       )}
 
       {showTable && (
@@ -104,38 +133,54 @@ export default function YearTimingPanel({
               </tr>
             </thead>
             <tbody>
-              {cands.map((c, i) => (
-                <tr
-                  key={`${c.year}-${c.option_letter}-${i}`}
-                  className={`border-t border-ink-200/40 dark:border-ink-600/30 ${
-                    c.liuqin_overlap
-                      ? "bg-amber-500/5 dark:bg-amber-500/10"
-                      : ""
-                  }`}
-                >
-                  <td className="px-3 py-2 font-medium text-ink-800 dark:text-ink-100">
-                    {c.option_letter ? `${c.option_letter} ` : ""}
-                    {c.year || "—"}
-                    {c.liuqin_overlap ? (
-                      <span className="ml-1 text-[10px] font-normal text-amber-700 dark:text-amber-300">
-                        六亲重合
+              {cands.map((c, i) => {
+                const isCritic =
+                  c.critic_prefer ||
+                  (criticLetter &&
+                    (c.option_letter || "").toUpperCase() === criticLetter) ||
+                  (criticYear != null && c.year === criticYear);
+                return (
+                  <tr
+                    key={`${c.year}-${c.option_letter}-${i}`}
+                    className={`border-t border-ink-200/40 dark:border-ink-600/30 ${
+                      isCritic
+                        ? "bg-violet-500/10 dark:bg-violet-500/15"
+                        : c.liuqin_overlap
+                          ? "bg-amber-500/5 dark:bg-amber-500/10"
+                          : ""
+                    }`}
+                  >
+                    <td className="px-3 py-2 font-medium text-ink-800 dark:text-ink-100">
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {c.option_letter ? `${c.option_letter} ` : ""}
+                        {c.year || "—"}
+                        {isCritic ? (
+                          <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-violet-500">
+                            Critic
+                          </span>
+                        ) : null}
+                        {c.liuqin_overlap ? (
+                          <span className="text-[10px] font-normal text-amber-700 dark:text-amber-300">
+                            六亲重合
+                          </span>
+                        ) : null}
                       </span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 text-ink-700 dark:text-ink-200">
-                    {c.gan_zhi || "—"}
-                  </td>
-                  <td className="px-3 py-2 tabular-nums text-ink-600 dark:text-ink-300">
-                    {typeof c.score === "number" ? c.score.toFixed(2) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-ink-600 dark:text-ink-300">
-                    {c.confidence || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-ink-500 dark:text-ink-400">
-                    {(c.reasons || []).slice(0, 3).join("；") || "—"}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-3 py-2 text-ink-700 dark:text-ink-200">
+                      {c.gan_zhi || "—"}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums text-ink-600 dark:text-ink-300">
+                      {typeof c.score === "number" ? c.score.toFixed(2) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-ink-600 dark:text-ink-300">
+                      {c.confidence || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-ink-500 dark:text-ink-400">
+                      {(c.reasons || []).slice(0, 3).join("；") || "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

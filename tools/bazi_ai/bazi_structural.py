@@ -1056,6 +1056,7 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
     #  母:正印为主,偏印同参（印星统称）— strength 可合参（历史口径）
     #  父:偏财为主,正财同参标签 — strength 不因正财抬高
     #  配偶:男正财+偏财 / 女正官+七杀 — 标签合参；strength 只认主星
+    #  子女:男官杀 / 女食伤 — 标签合参（子↔女星互参）；strength 只认主星
     #    （副星抬强在 gold 上易假阳，det 以主星为准）
     mother_merged = _merge_dual_star(
         "母亲", mapping["mother"], "偏印" if mapping["mother"] == "正印" else "正印",
@@ -1077,6 +1078,19 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         secondary_label="同参",
         merge_strength=False,
     )
+    # 子女双星: 男命官杀皆子女, 女命食伤皆子女 — 互为同参标签
+    son_primary = mapping["son"]
+    dau_primary = mapping["daughter"]
+    son_merged = _merge_dual_star(
+        "儿子", son_primary, dau_primary,
+        secondary_label="同参",
+        merge_strength=False,
+    )
+    dau_merged = _merge_dual_star(
+        "女儿", dau_primary, son_primary,
+        secondary_label="同参",
+        merge_strength=False,
+    )
 
     result: Dict[str, Any] = {
         "gender": gender_key,
@@ -1084,8 +1098,8 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         "father": father_merged,
         "mother": mother_merged,
         "spouse": spouse_merged,
-        "son": _describe("儿子", mapping["son"]),
-        "daughter": _describe("女儿", mapping["daughter"]),
+        "son": son_merged,
+        "daughter": dau_merged,
         "brother": _describe("兄弟", mapping["brother"]),
         "sister": _describe("姐妹", mapping["sister"]),
         "palace_map": palace_map,

@@ -107,6 +107,12 @@ class TestYearTimingSurface:
         assert critic.get("assert_single_year") is False
         if critic.get("letter"):
             assert critic["letter"] in "ABCD"
-            # Preference tag may appear on the preferred candidate
             letters = {c.option_letter for c in s.candidates}
-            assert critic["letter"] in letters or True
+            assert critic["letter"] in letters
+            preferred = [c for c in s.candidates if c.critic_prefer]
+            assert preferred, "critic_prefer flag should mark preferred candidate"
+            assert preferred[0].option_letter == critic["letter"]
+            d = s.to_dict()
+            assert any(
+                c.get("critic_prefer") for c in (d.get("candidates") or [])
+            )

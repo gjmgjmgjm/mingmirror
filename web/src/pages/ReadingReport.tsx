@@ -437,12 +437,33 @@ function SectionBody({
       const bridgeSamples: any[] = Array.isArray(bridge.samples)
         ? bridge.samples
         : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const critic: any = d.structural_critic || {};
+      const criticLetter = String(
+        critic.prefer_letter || critic.letter || ""
+      ).toUpperCase();
+      const criticYear = critic.prefer_year;
+      const hasCritic = Boolean(criticLetter || criticYear);
       return (
         <>
           {d.copy && (
             <p className="mb-3 text-sm leading-relaxed text-ink-600 dark:text-ink-300">
               {d.copy}
             </p>
+          )}
+          {hasCritic && cands.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-300/40 bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-100">
+              <span className="rounded-md bg-violet-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                Critic 偏好
+              </span>
+              <span className="font-semibold">
+                {criticLetter ? `选项 ${criticLetter}` : ""}
+                {criticYear ? ` · ${criticYear}年` : ""}
+              </span>
+              <span className="text-xs opacity-80">
+                并列参考 · 不作必在此年
+              </span>
+            </div>
           )}
           {cands.length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-ink-200/60 dark:border-ink-600/40">
@@ -456,31 +477,50 @@ function SectionBody({
                   </tr>
                 </thead>
                 <tbody>
-                  {cands.map((c, i) => (
-                    <tr
-                      key={i}
-                      className={`border-t border-ink-200/40 dark:border-ink-600/30 ${
-                        c.liuqin_overlap ? "bg-amber-500/5" : ""
-                      }`}
-                    >
-                      <td className="px-3 py-2 font-medium text-ink-800 dark:text-ink-100">
-                        {c.option_letter ? `${c.option_letter} ` : ""}
-                        {c.year || "—"}
-                        {c.liuqin_overlap ? (
-                          <span className="ml-1 text-[10px] text-amber-700">
-                            六亲重合
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2">{c.gan_zhi || "—"}</td>
-                      <td className="px-3 py-2 tabular-nums">
-                        {typeof c.score === "number" ? c.score.toFixed(2) : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-ink-500">
-                        {(c.reasons || []).slice(0, 3).join("；") || "—"}
-                      </td>
-                    </tr>
-                  ))}
+                  {cands.map((c, i) => {
+                    const isCritic =
+                      c.critic_prefer ||
+                      (criticLetter &&
+                        String(c.option_letter || "").toUpperCase() ===
+                          criticLetter) ||
+                      (criticYear != null && c.year === criticYear);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-t border-ink-200/40 dark:border-ink-600/30 ${
+                          isCritic
+                            ? "bg-violet-500/10"
+                            : c.liuqin_overlap
+                              ? "bg-amber-500/5"
+                              : ""
+                        }`}
+                      >
+                        <td className="px-3 py-2 font-medium text-ink-800 dark:text-ink-100">
+                          {c.option_letter ? `${c.option_letter} ` : ""}
+                          {c.year || "—"}
+                          {isCritic ? (
+                            <span className="ml-1 rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              Critic
+                            </span>
+                          ) : null}
+                          {c.liuqin_overlap ? (
+                            <span className="ml-1 text-[10px] text-amber-700">
+                              六亲重合
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">{c.gan_zhi || "—"}</td>
+                        <td className="px-3 py-2 tabular-nums">
+                          {typeof c.score === "number"
+                            ? c.score.toFixed(2)
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-ink-500">
+                          {(c.reasons || []).slice(0, 3).join("；") || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
