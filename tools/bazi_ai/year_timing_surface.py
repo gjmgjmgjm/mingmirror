@@ -246,12 +246,46 @@ def resolve_year_timing(
         cands = []  # do not leak noisy letters into UI
 
     title, copy = _COPY[mode]
+    shown = cands if mode != "trend_only" else []
+
+    # Optional pure-rule re-rank (大运/驿马). Soft signal only — never assert_single_year.
+    critic_meta: Dict[str, Any] = {}
+    if shown:
+        try:
+            from tools.bazi_ai.year_critic import structural_critic_pick
+
+            letter, cmeta = structural_critic_pick(
+                bazi,
+                question,
+                opts,
+                gender=gender,
+                birth_date=birth_date,
+                birth_time=birth_time,
+                top_k=max(2, top_k),
+            )
+            critic_meta = {
+                "letter": letter,
+                "reason": cmeta.get("reason"),
+                "picked_score": cmeta.get("picked_score"),
+                "base_top1": cmeta.get("base_top1"),
+                # Product: critic may reorder preference but UI still shows multi-candidate.
+                "assert_single_year": False,
+            }
+            if letter:
+                for c in shown:
+                    if (c.option_letter or "").upper() == letter.upper():
+                        if "结构 critic 偏好" not in c.reasons:
+                            c.reasons = list(c.reasons or []) + ["结构 critic 偏好（并列参考）"]
+                        break
+        except Exception:
+            critic_meta = {"reason": "critic_unavailable"}
+
     return YearTimingSurface(
         event_kind=kind,
         display_mode=mode,
         trust=trust,
         assert_single_year=assert_one,
-        candidates=cands if mode != "trend_only" else [],
+        candidates=shown,
         product_title=title,
         product_copy=copy,
         disclaimer=_DISCLAIMER,
@@ -260,6 +294,7 @@ def resolve_year_timing(
             "margin": margin,
             "top_confidence": top.confidence,
             "kind": kind,
+            "structural_critic": critic_meta,
         },
     )
 

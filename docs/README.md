@@ -16,6 +16,9 @@
 | [PRD-mingmirror.md](./PRD-mingmirror.md) | 命理 | 命镜产品需求:数字孪生 / 多 Agent 议会 / 事件反推校准 / 择日引擎 / 命运剧本 |
 | [bazi_ai_90_roadmap.md](./bazi_ai_90_roadmap.md) | 命理 | 八字准确率推进计划(Phase 0–5 + §7「真人结构层」战略转向) |
 | [bazi_ai_error_analysis.md](./bazi_ai_error_analysis.md) | 命理 | 八字错误类型诊断、占比与修复优先级 |
+| [structural-trust-layer.md](./structural-trust-layer.md) | 命理 | 结构层 gold / 生产启动守卫 / device 隔离 |
+| [capability-boundary.md](./capability-boundary.md) | 命理 | **交付口径** A 结构 det / B 应期 shortlist / C 趋势；UI 红线 |
+| [resources_datasets_techniques.md](./resources_datasets_techniques.md) | 命理 | **全网专业技术、数据集、开源栈与 ROI 路线图** |
 | [sync-status.md](./sync-status.md) | 下载器 | CLI 版与桌面版(douyin-downloader-desktop)共享模块同步状态 |
 | [../README.md](../README.md) / [../README.zh-CN.md](../README.zh-CN.md) | 全局 | 用户快速开始 |
 | [../AGENTS.md](../AGENTS.md) 及各子目录 `AGENTS.md` | — | 模块级开发说明(auth / cli / core / storage / control / tools / server / utils) |
@@ -24,25 +27,84 @@
 
 ## 📊 命理准确率记分板(live)
 
-由 `python benchmarks/baziqa/accuracy_report.py` 实时生成(**零 API、确定性尺子**)。最近一次运行:**2026-07-15**。
+由 `python benchmarks/baziqa/accuracy_report.py` 实时生成(**零 API、确定性尺子**)。最近一次运行:**2026-07-19**。
 
 | 维度 | 准确率 | gold 性质 |
 |------|--------|-----------|
 | 排盘 | 100% (32/32) | ✅ 真实(对齐 iztro 预制命盘) |
-| 用神 | 90% (83/92, 大n) | ✅ 真实(对齐穷通宝鉴调候) |
+| 用神 | 100% (92/92, 大n) | ✅ 真实(对齐穷通宝鉴调候) |
 | 格局 | 100% | 确定性注入(月令定格,非 accuracy) |
 | 忌神 | 92% | 确定性注入(规则引擎,非 accuracy) |
 | 旺衰 | 75% | LLM-引擎一致性(非 accuracy) |
-| 六亲强弱 | 85% (33/39, det, 噪声剔除) | ✅ 真实(杨炎 gold,det 绕过 LLM) |
-| 具体事件/年份 | 0% 开放式 / 40% MCQ | 真实(名人验证事件) |
+| 六亲强弱 | **~93% (42/45, det, 噪声剔除)** | ✅ 真实(杨炎 gold,det 绕过 LLM) |
+| 具体事件/年份 | 0% 开放式 / ~32–48% MCQ (MiniMax) | 真实(Contest8 / 名人) |
 
 > **口径说明**
 > - ✅ 真实 = 有独立 / 权威 gold,数字可 cite;格局/忌神/旺衰是**确定性注入或 LLM-引擎一致性**,**不是 accuracy**(不证明对错),需 gold 才算准确率。
-> - **「结构层 90%」目标框定**:仅指**有独立 gold 的维度**——排盘 100%、用神 90% 已达成;**六亲 85%(det,n=39)** 经母星正偏印同参、子女双星匹配、3 条大运/误检噪声剔除后过 80%。格局/忌神/旺衰**不计入**;事件层是物理天花板。
+> - **「结构层 90%」目标框定**:仅指**有独立 gold 的维度**——排盘 100%、用神 100%(穷通 n=92)、**六亲 ~93%(det,n=45)** 均已达成（本气得令 / 子女透干严判 / 透干克泄阈值 / 双星标签合参）。格局/忌神/旺衰**不计入**;事件层是物理天花板。
 > - **六亲** det:启发式再加「坐支通根」等规则实测回退至 67–69%,故停在可解释清洗而非过拟合。详见 `validate_liuqin_det.py` 的 `_DET_NOISE`。
 > - **事件层开放式 ≈0% 是物理天花板**,非 bug——产品应输出**趋势**而非断言。
 
-刷新需 API 的维度(设定 `DEEPSEEK_API_KEY` 后):
+**零 API 全量评测**（Contest8 / MingLi / Celebrity50 本地数据）:
+
+```bash
+python benchmarks/baziqa/zero_api_eval.py
+```
+
+**MiniMax Contest8 MCQ**（`abab6.5s-chat` + enhanced + soft shortlist + post-LLM trust, LOO）:
+
+| 切片 | 准确率 | 结果文件 |
+|------|--------|----------|
+| n=40 / n=80 小样本 | 最高 **47.5% / 43.8%** | **不可外推**；方差大 |
+| **n=200 soft v6（当前全量）** | **31.5%** (63/200) | `…_n200_v6.jsonl` |
+| n=200 soft v5 | 31.0% (62/200) | 六亲+婚姻措辞 |
+| n=200 soft v3 | 32.0% (64/200) | 早期 soft shortlist |
+| n=40 arbiter | 37.5% | 2×费用，未超过 soft 峰值 |
+
+**全量分域（n=200，v6 vs v5 vs v3）**
+
+| 域 | v3 | v5 | **v6** | 解读 |
+|----|----|----|--------|------|
+| 事业/学历 | 37.1% | 20.0% | **37.1%** | 事业提示常开把 v5 回落拉回 |
+| 家庭/六亲 | 15.4% | 38.5% | **46.2%** | liuqin 提示持续有效 |
+| 年份 | 34.2% | 31.6% | 31.6% | shortlist 天花板仍在 |
+| 婚姻状态 | 21.1% | 21.1% | 21.1% | 长期短板 |
+| 性格 | 31.2% | 50.0% | 25.0% | 高方差 |
+
+> **诚实结论**：全量 Contest8 + MiniMax abab6.5s 目前 **稳定在 ~31–32%**。规则层（shortlist / 六亲 / 事业）对**分域**有可复现收益，但被后半难题 + 模型方差抵消，整体 KPI 不再靠改 prompt 微抬。
+
+**年份 LOO 再标定（2026-07-19，`rule_calibrate_v2.py`）**
+
+| 尺子（离线 year-asking n=45） | 标定前 | **标定后** |
+|------------------------------|--------|------------|
+| ungated top-1 | ~33–36% | **44.4%** |
+| ungated top-2 | ~53–55% | **60.0%** |
+| soft shortlist fire | ~27–33 | 33 |
+| soft shortlist top-2 | ~60% | **63.6%** |
+
+权重变化要点：半三合 0.4→0.2；反吟 / 流年冲宫 → 负权；门控 score 地板 0.4→0.2（适配新分尺）。
+
+**模型 A/B（同协议 enhanced+soft shortlist+LOO，Contest8 n=40）**
+
+| 模型 | 准确率 | 备注 |
+|------|--------|------|
+| **abab6.5s-chat** (v2 峰值) | **47.5%** | 当前生产默认 |
+| MiniMax-M2.5-highspeed | 42.5% | 需 max_tokens≥3k（thinking 耗额度） |
+| abab ensemble=2 | 37.5% | 2×费用，未抬分 |
+| MiniMax-Text-01 | 32.5% | 更差 |
+| 全量 n200 abab | **~31–32%** | 诚实 KPI |
+
+> 结论：在可用 MiniMax 型号里 **abab6.5s-chat 仍最优**；换 M2.5 / ensemble **不能突破** ~45% n40 天花板。eval 已支持 strip `<think>`、M 系列自动抬 max_tokens。
+
+```bash
+# 全量 Contest8（需 MINIMAX_API_KEY / config.yml bazi_ai）
+python -m tools.bazi_ai.baziqa_eval --data benchmarks/baziqa/data --datasets contest8 \
+  --mode enhanced --leave-one-out --shortlist-mode soft --limit 200 \
+  --base-url https://api.minimax.chat/v1 --model abab6.5s-chat \
+  --output benchmarks/baziqa/results/contest8_minimax_abab65s_n200.jsonl
+```
+
+刷新需 API 的维度(设定 `MINIMAX_API_KEY` 或 `DEEPSEEK_API_KEY` 后):
 
 ```bash
 python benchmarks/baziqa/validate_consensus.py --limit 12   # 格局/忌神/旺衰 自洽

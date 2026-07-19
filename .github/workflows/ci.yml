@@ -72,6 +72,12 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
+      - name: Structural golden + production boot guards
+        run: python -m pytest tests/test_structural_golden.py tests/test_council_e2e.py tests/test_production_boot.py tests/test_zero_api_eval.py tests/test_det_enforcement.py -v --tb=short
+
+      - name: Zero-API dataset eval (short)
+        run: python benchmarks/baziqa/zero_api_eval.py --sources contest8,mingli --year-limit 80
+
   compat:
     name: Compatibility (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

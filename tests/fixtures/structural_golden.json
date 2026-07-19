@@ -1,0 +1,370 @@
+{
+  "version": 2,
+  "description": "Zero-API structural gold for bazi pillars / dayun / ziwei. Update intentionally when algorithms change.",
+  "pillars_solar": [
+    {
+      "id": "afternoon_wall",
+      "birth_datetime": "1990-05-20T14:30:00",
+      "pillars": {"year": "庚午", "month": "辛巳", "day": "乙酉", "hour": "癸未"}
+    },
+    {
+      "id": "late_zi_next_day",
+      "birth_datetime": "1990-05-20T23:15:00",
+      "note": "23:00 子时归次日：日柱=次日，时柱与 00:15 一致",
+      "pillars": {"year": "庚午", "month": "辛巳", "day": "丙戌", "hour": "戊子"}
+    },
+    {
+      "id": "early_zi_same_as_late",
+      "birth_datetime": "1990-05-21T00:15:00",
+      "pillars": {"year": "庚午", "month": "辛巳", "day": "丙戌", "hour": "戊子"}
+    },
+    {
+      "id": "true_solar_hour_cross",
+      "kind": "true_solar",
+      "birth_datetime": "1990-05-20T15:10:00",
+      "longitude": 100.0,
+      "note": "东经100相对120° 偏西80分钟 → 时柱由申变未",
+      "wall_hour": "甲申",
+      "true_solar_hour": "癸未",
+      "true_solar_pillars": {"year": "庚午", "month": "辛巳", "day": "乙酉", "hour": "癸未"}
+    },
+    {
+      "id": "lichun_window_1984_02_04",
+      "birth_datetime": "1984-02-04T00:00:00",
+      "pillars": {"year": "甲子", "month": "丙寅", "day": "戊辰", "hour": "壬子"}
+    },
+    {
+      "id": "lichun_window_1984_02_05",
+      "birth_datetime": "1984-02-05T00:00:00",
+      "pillars": {"year": "甲子", "month": "丙寅", "day": "己巳", "hour": "甲子"}
+    },
+    {
+      "id": "y2k_early_zi",
+      "birth_datetime": "2000-01-01T00:30:00",
+      "pillars": {"year": "己卯", "month": "丙子", "day": "戊午", "hour": "壬子"}
+    },
+    {
+      "id": "y2k_late_zi",
+      "birth_datetime": "2000-01-01T23:30:00",
+      "pillars": {"year": "己卯", "month": "丙子", "day": "己未", "hour": "甲子"}
+    },
+    {
+      "id": "solstice_2012",
+      "birth_datetime": "2012-12-21T12:00:00",
+      "pillars": {"year": "壬辰", "month": "壬子", "day": "丙辰", "hour": "甲午"}
+    },
+    {
+      "id": "chen_hour_1995",
+      "birth_datetime": "1995-08-08T08:08:00",
+      "pillars": {"year": "乙亥", "month": "甲申", "day": "辛未", "hour": "壬辰"}
+    },
+    {
+      "id": "hai_hour_1978",
+      "birth_datetime": "1978-03-15T22:30:00",
+      "pillars": {"year": "戊午", "month": "乙卯", "day": "丙子", "hour": "己亥"}
+    }
+  ],
+  "pillars_lunar": [
+    {
+      "id": "lunar_non_leap",
+      "lunar_year": 1990,
+      "lunar_month": 5,
+      "lunar_day": 20,
+      "hour": 14,
+      "minute": 30,
+      "leap": false,
+      "pillars": {"year": "庚午", "month": "壬午", "day": "戊申", "hour": "己未"}
+    },
+    {
+      "id": "lunar_leap_same_md",
+      "lunar_year": 1990,
+      "lunar_month": 5,
+      "lunar_day": 20,
+      "hour": 14,
+      "minute": 30,
+      "leap": true,
+      "pillars": {"year": "庚午", "month": "癸未", "day": "戊寅", "hour": "己未"}
+    }
+  ],
+  "dayun": [
+    {
+      "id": "male_forward",
+      "bazi": "庚午 辛巳 乙酉 癸未",
+      "gender": "male",
+      "birth_date": "1990-05-20",
+      "birth_time": "14:30",
+      "first_pillar": "壬午",
+      "second_pillar": "癸未"
+    },
+    {
+      "id": "female_reverse",
+      "bazi": "庚午 辛巳 乙酉 癸未",
+      "gender": "female",
+      "birth_date": "1990-05-20",
+      "birth_time": "14:30",
+      "first_pillar": "庚辰",
+      "second_pillar": "己卯"
+    },
+    {
+      "id": "empty_gender_defaults_male",
+      "bazi": "庚午 辛巳 乙酉 癸未",
+      "gender": "",
+      "birth_date": "1990-05-20",
+      "birth_time": "14:30",
+      "first_pillar": "壬午"
+    },
+    {
+      "id": "jiazi_male",
+      "bazi": "甲子 丙寅 戊辰 庚午",
+      "gender": "male",
+      "birth_date": "1990-01-15",
+      "birth_time": "12:00",
+      "first_pillar": "丁卯",
+      "second_pillar": "戊辰"
+    },
+    {
+      "id": "jiazi_female",
+      "bazi": "甲子 丙寅 戊辰 庚午",
+      "gender": "female",
+      "birth_date": "1990-01-15",
+      "birth_time": "12:00",
+      "first_pillar": "乙丑",
+      "second_pillar": "甲子"
+    },
+    {
+      "id": "yimao_male",
+      "bazi": "乙卯 戊寅 庚子 丙子",
+      "gender": "male",
+      "birth_date": "1990-02-15",
+      "birth_time": "12:00",
+      "first_pillar": "丁丑",
+      "second_pillar": "丙子"
+    },
+    {
+      "id": "yimao_female",
+      "bazi": "乙卯 戊寅 庚子 丙子",
+      "gender": "female",
+      "birth_date": "1990-02-15",
+      "birth_time": "12:00",
+      "first_pillar": "己卯",
+      "second_pillar": "庚辰"
+    },
+    {
+      "id": "renyin_male",
+      "bazi": "壬寅 壬子 甲辰 丙寅",
+      "gender": "male",
+      "birth_date": "2002-01-10",
+      "birth_time": "06:00",
+      "first_pillar": "癸丑",
+      "second_pillar": "甲寅"
+    },
+    {
+      "id": "renyin_female",
+      "bazi": "壬寅 壬子 甲辰 丙寅",
+      "gender": "female",
+      "birth_date": "2002-01-10",
+      "birth_time": "06:00",
+      "first_pillar": "辛亥",
+      "second_pillar": "庚戌"
+    }
+  ],
+  "ziwei": [
+    {
+      "id": "z1",
+      "bazi": "乙卯 戊寅 庚子 丙子",
+      "day_of_month": 15,
+      "life_palace": "寅",
+      "bureau_label": "土5局",
+      "ziwei_branch": "丑",
+      "bureau_source": "life_palace_nayin"
+    },
+    {
+      "id": "z2",
+      "bazi": "庚午 辛巳 戊寅 己未",
+      "day_of_month": 20,
+      "life_palace": "戌",
+      "bureau_label": "土5局",
+      "ziwei_branch": "午",
+      "ming_main_contains": ["天府"]
+    },
+    {
+      "id": "z3",
+      "bazi": "甲子 丙寅 戊辰 庚午",
+      "day_of_month": 15,
+      "life_palace": "申",
+      "bureau_label": "金4局",
+      "ziwei_branch": "亥",
+      "ming_main_contains": ["太阳", "巨门"]
+    },
+    {
+      "id": "z4",
+      "bazi": "壬寅 壬子 甲辰 丙寅",
+      "day_of_month": 15,
+      "life_palace": "戌",
+      "bureau_label": "金4局",
+      "ziwei_branch": "亥",
+      "ming_main_contains": ["天机", "天梁"]
+    },
+    {
+      "id": "z5",
+      "bazi": "己巳 己巳 甲子 甲子",
+      "day_of_month": 15,
+      "life_palace": "巳",
+      "bureau_label": "木3局",
+      "ziwei_branch": "酉",
+      "ming_main_contains": ["武曲"]
+    },
+    {
+      "id": "z6_wuhu_jia_si",
+      "note": "甲年命宫巳 → 己巳纳音木 → 木三局（五虎遁校验）",
+      "year_stem": "甲",
+      "life_palace": "巳",
+      "palace_stem": "己",
+      "element": "木",
+      "bureau": 3
+    },
+    {
+      "id": "z7",
+      "bazi": "乙丑 丁亥 己卯 辛未",
+      "day_of_month": 15,
+      "life_palace": "辰",
+      "bureau_label": "金4局",
+      "ziwei_branch": "亥",
+      "ming_main_contains": ["廉贞"]
+    },
+    {
+      "id": "z8",
+      "bazi": "丙寅 庚寅 壬午 甲辰",
+      "day_of_month": 15,
+      "life_palace": "戌",
+      "bureau_label": "木3局",
+      "ziwei_branch": "酉",
+      "ming_main_contains": ["巨门"]
+    },
+    {
+      "id": "z9",
+      "bazi": "丁卯 壬子 癸巳 乙卯",
+      "day_of_month": 15,
+      "life_palace": "酉",
+      "bureau_label": "土5局",
+      "ziwei_branch": "丑",
+      "ming_main_contains": ["武曲", "七杀"]
+    },
+    {
+      "id": "z10",
+      "bazi": "戊辰 甲寅 乙酉 丙子",
+      "day_of_month": 15,
+      "life_palace": "寅",
+      "bureau_label": "水2局",
+      "ziwei_branch": "未",
+      "ming_main_contains": ["天同", "天梁"]
+    },
+    {
+      "id": "z11",
+      "bazi": "己巳 戊辰 丙午 戊子",
+      "day_of_month": 15,
+      "life_palace": "辰",
+      "bureau_label": "木3局",
+      "ziwei_branch": "酉",
+      "ming_main_contains": ["天同", "破军"]
+    },
+    {
+      "id": "z12",
+      "bazi": "庚午 辛巳 丁未 己酉",
+      "day_of_month": 15,
+      "life_palace": "申",
+      "bureau_label": "水2局",
+      "ziwei_branch": "未"
+    },
+    {
+      "id": "z13",
+      "bazi": "辛未 甲午 戊申 庚申",
+      "day_of_month": 15,
+      "life_palace": "戌",
+      "bureau_label": "木3局",
+      "ziwei_branch": "酉",
+      "ming_main_contains": ["巨门"]
+    },
+    {
+      "id": "z14",
+      "bazi": "壬申 乙巳 己亥 辛丑",
+      "day_of_month": 15,
+      "life_palace": "辰",
+      "bureau_label": "火6局",
+      "ziwei_branch": "卯",
+      "ming_main_contains": ["巨门"]
+    },
+    {
+      "id": "z15",
+      "bazi": "癸酉 丙午 庚子 壬寅",
+      "day_of_month": 15,
+      "life_palace": "辰",
+      "bureau_label": "土5局",
+      "ziwei_branch": "丑",
+      "ming_main_contains": ["太阴"]
+    },
+    {
+      "id": "z16",
+      "bazi": "甲戌 丁未 辛丑 癸巳",
+      "day_of_month": 15,
+      "life_palace": "寅",
+      "bureau_label": "火6局",
+      "ziwei_branch": "卯",
+      "ming_main_contains": ["天机", "太阴"]
+    },
+    {
+      "id": "z17",
+      "bazi": "乙亥 己酉 壬寅 甲子",
+      "day_of_month": 15,
+      "life_palace": "酉",
+      "bureau_label": "水2局",
+      "ziwei_branch": "未",
+      "ming_main_contains": ["天府"]
+    },
+    {
+      "id": "z18",
+      "bazi": "丙子 庚子 癸卯 乙丑",
+      "day_of_month": 15,
+      "life_palace": "亥",
+      "bureau_label": "木3局",
+      "ziwei_branch": "酉",
+      "ming_main_contains": ["天相"]
+    },
+    {
+      "id": "z19",
+      "bazi": "丁丑 辛丑 甲辰 丙寅",
+      "day_of_month": 15,
+      "life_palace": "亥",
+      "bureau_label": "金4局",
+      "ziwei_branch": "亥",
+      "ming_main_contains": ["紫微", "七杀"]
+    },
+    {
+      "id": "z20",
+      "bazi": "戊寅 壬寅 乙巳 丁卯",
+      "day_of_month": 15,
+      "life_palace": "亥",
+      "bureau_label": "水2局",
+      "ziwei_branch": "未",
+      "ming_main_contains": ["贪狼"]
+    },
+    {
+      "id": "z21_wuhu_yi_yin",
+      "note": "乙年命宫寅 → 戊寅纳音土 → 土五局",
+      "year_stem": "乙",
+      "life_palace": "寅",
+      "palace_stem": "戊",
+      "element": "土",
+      "bureau": 5
+    },
+    {
+      "id": "z22_wuhu_bing_shen",
+      "note": "丙年命宫申 → 丙申纳音火 → 火六局",
+      "year_stem": "丙",
+      "life_palace": "申",
+      "palace_stem": "丙",
+      "element": "火",
+      "bureau": 6
+    }
+  ]
+}

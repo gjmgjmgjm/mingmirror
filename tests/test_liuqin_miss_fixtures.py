@@ -2,7 +2,7 @@
 
 If a heuristic change flips a known miss to a hit, this test fails with a clear
 message so the fixture can be re-exported intentionally — not silently lost.
-Also enforces the live det floor (85% after noise exclusion).
+Also enforces the live det floor (90% after noise exclusion).
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ class TestLiuqinMissFixtures:
 
 
 def test_live_det_floor():
-    """Live det accuracy must not drop below 85% (noise-excluded)."""
+    """Live det accuracy must not drop below 90% (noise-excluded)."""
     script = ROOT / "benchmarks" / "baziqa" / "validate_liuqin_det.py"
     proc = subprocess.run(
         [sys.executable, str(script), "--limit", "200"],
@@ -113,11 +113,11 @@ def test_live_det_floor():
     )
     assert proc.returncode == 0, proc.stderr or proc.stdout
     out = proc.stdout
-    # e.g. "确定性六亲强弱准确率: 33/39 = 85%"
+    # e.g. "确定性六亲强弱准确率: 36/39 = 92%"
     import re
 
     m = re.search(r"准确率:\s*(\d+)/(\d+)\s*=\s*(\d+)%", out)
     assert m, f"could not parse accuracy from:\n{out[-500:]}"
     hit, n, pct = int(m.group(1)), int(m.group(2)), int(m.group(3))
     assert n >= 30, f"unexpected small n={n}"
-    assert pct >= 85, f"det floor regression: {hit}/{n} = {pct}% < 85%"
+    assert pct >= 90, f"det floor regression: {hit}/{n} = {pct}% < 90%"

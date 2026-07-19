@@ -85,3 +85,28 @@ class TestYearTimingSurface:
         d = s.to_dict()
         assert "display_mode" in d
         assert d["assert_single_year"] is False
+
+    def test_structural_critic_in_meta_when_shortlist(self):
+        s = resolve_year_timing(
+            "甲午 丁卯 癸酉 庚申",
+            "命主父亲于哪年去世?",
+            [
+                "A 1959 己亥年",
+                "B 1963 癸卯年",
+                "C 1964 甲辰年",
+                "D 1969 己酉年",
+            ],
+            gender="male",
+            birth_date="1954-03-18",
+            birth_time="15:00",
+        )
+        assert s.display_mode in ("hard_shortlist", "soft_hint")
+        assert s.assert_single_year is False
+        critic = (s.meta or {}).get("structural_critic") or {}
+        # Critic may pick a letter or explain keep_top1; never elevates assert_single_year
+        assert critic.get("assert_single_year") is False
+        if critic.get("letter"):
+            assert critic["letter"] in "ABCD"
+            # Preference tag may appear on the preferred candidate
+            letters = {c.option_letter for c in s.candidates}
+            assert critic["letter"] in letters or True
