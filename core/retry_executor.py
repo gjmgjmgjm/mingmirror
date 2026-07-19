@@ -121,15 +121,19 @@ async def retry_failed_awemes(
     # downloader's `get_save_path` picks up the same output_dir and folder
     # template that the original run used. Snapshot + restore the values
     # we overwrite, matching `_execute_download` in server/app.py.
+    # Deep-copy nested dict values so in-place config.update() cannot mutate snap.
+    from copy import deepcopy
+
     snap: Dict[str, Any] = {}
     if overrides:
         for k in overrides.keys():
-            snap[k] = config.get(k)
+            snap[k] = deepcopy(config.get(k))
         config.update(**overrides)
 
     try:
         cookies = cookie_manager.get_cookies()
-        async with DouyinAPIClient(cookies) as api_client:
+        proxy = config.get("proxy") if hasattr(config, "get") else None
+        async with DouyinAPIClient(cookies, proxy=proxy) as api_client:
             if is_short_url(url):
                 resolved = await api_client.resolve_short_url(normalize_short_url(url))
                 if not resolved:

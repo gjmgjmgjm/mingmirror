@@ -210,13 +210,33 @@ class Database:
         )
         await db.commit()
 
-    async def get_latest_aweme_time(self, author_id: str) -> Optional[int]:
+    async def get_latest_aweme_time(
+        self,
+        author_id: Optional[str] = None,
+        *,
+        author_sec_uid: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return latest aweme create_time for an author.
+
+        Prefer ``author_id`` (uid). When missing or no rows, fall back to
+        ``author_sec_uid`` so increase mode still works when only sec_uid is known.
+        """
         db = await self._get_conn()
-        cursor = await db.execute(
-            "SELECT MAX(create_time) FROM aweme WHERE author_id = ?", (author_id,)
-        )
-        result = await cursor.fetchone()
-        return result[0] if result and result[0] else None
+        if author_id:
+            cursor = await db.execute(
+                "SELECT MAX(create_time) FROM aweme WHERE author_id = ?", (author_id,)
+            )
+            result = await cursor.fetchone()
+            if result and result[0]:
+                return result[0]
+        if author_sec_uid:
+            cursor = await db.execute(
+                "SELECT MAX(create_time) FROM aweme WHERE author_sec_uid = ?",
+                (author_sec_uid,),
+            )
+            result = await cursor.fetchone()
+            return result[0] if result and result[0] else None
+        return None
 
     async def add_history(self, history_data: Dict[str, Any]):
         db = await self._get_conn()

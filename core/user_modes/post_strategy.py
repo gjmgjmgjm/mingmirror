@@ -25,6 +25,15 @@ class PostUserModeStrategy(BaseUserModeStrategy):
 
         number_limit = int(self.downloader.config.get("number", {}).get(self.mode_name, 0) or 0)
         media_filter_enabled = self._media_type_filter_enabled()
+        increase_enabled = bool(
+            self.downloader.config.get("increase", {}).get(self.mode_name, False)
+        )
+        latest_time = None
+        if increase_enabled and self.downloader.database:
+            latest_time = await self.downloader.database.get_latest_aweme_time(
+                user_info.get("uid"),
+                author_sec_uid=user_info.get("sec_uid") or sec_uid,
+            )
 
         self.downloader._progress_update_step("拉取作品列表", "分页抓取中")
 
@@ -46,7 +55,16 @@ class PostUserModeStrategy(BaseUserModeStrategy):
                 break
 
             page_items = self._filter_pinned_items(page_items)
-            aweme_list.extend(page_items)
+            if increase_enabled and latest_time:
+                new_items = [a for a in page_items if a.get("create_time", 0) > latest_time]
+                aweme_list.extend(new_items)
+                if len(new_items) < len(page_items):
+                    self.downloader._progress_update_step(
+                        "拉取作品列表", f"增量截止，已抓取 {len(aweme_list)} 条"
+                    )
+                    break
+            else:
+                aweme_list.extend(page_items)
 
             self.downloader._progress_update_step("拉取作品列表", f"已抓取 {len(aweme_list)} 条")
 

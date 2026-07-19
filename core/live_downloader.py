@@ -275,6 +275,7 @@ class LiveDownloader(BaseDownloader):
                 url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=None, sock_read=idle_timeout),
+                proxy=getattr(self.api_client, "proxy", None) or None,
             ) as resp:
                 if resp.status != 200:
                     logger.error("Live stream HTTP %s for %s", resp.status, target_path.name)

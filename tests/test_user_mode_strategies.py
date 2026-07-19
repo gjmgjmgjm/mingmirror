@@ -71,7 +71,7 @@ def test_like_strategy_increment_stops_at_first_downloaded_aweme():
             }
 
     class _Database:
-        async def get_latest_aweme_time(self, _author_id):
+        async def get_latest_aweme_time(self, _author_id=None, **kwargs):
             return None
 
         async def is_downloaded(self, aweme_id):
@@ -392,7 +392,7 @@ def test_collect_strategy_expands_collect_folders_and_deduplicates_aweme():
 
 def test_collect_strategy_expansion_does_not_apply_number_limit_or_increase_early():
     class _Database:
-        async def get_latest_aweme_time(self, _author_id):
+        async def get_latest_aweme_time(self, _author_id=None, **kwargs):
             return 1700000000
 
     class _API:
@@ -535,7 +535,7 @@ def test_collect_mix_strategy_keeps_direct_aweme_items_and_expands_remaining_met
 
 def test_collect_mix_strategy_expansion_does_not_apply_number_limit_or_increase_early():
     class _Database:
-        async def get_latest_aweme_time(self, _author_id):
+        async def get_latest_aweme_time(self, _author_id=None, **kwargs):
             return 1700000000
 
     class _API:

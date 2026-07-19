@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.bazi_cli import (
+# Optional OCR stack (rapidocr → onnxruntime). Skip cleanly when missing.
+pytest.importorskip("onnxruntime")
+
+from tools.bazi_cli import (  # noqa: E402
     build_knowledge_base_for_directory,
     extract_bazi_for_directory,
     scan_video_dirs,

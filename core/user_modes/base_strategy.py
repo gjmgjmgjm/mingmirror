@@ -104,7 +104,10 @@ class BaseUserModeStrategy(ABC):
         )
         latest_time = None
         if increase_enabled and self.downloader.database and not stop_at_downloaded_aweme:
-            latest_time = await self.downloader.database.get_latest_aweme_time(user_info.get("uid"))
+            latest_time = await self.downloader.database.get_latest_aweme_time(
+                user_info.get("uid"),
+                author_sec_uid=user_info.get("sec_uid") or sec_uid,
+            )
 
         while has_more:
             await self.downloader.rate_limiter.acquire()

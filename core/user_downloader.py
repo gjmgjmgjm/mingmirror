@@ -35,8 +35,9 @@ class UserDownloader(BaseDownloader):
         else:
             modes = ["post"]
 
-        if not self._validate_mode_scope(sec_uid, modes):
-            return result
+        scope_error = self._validate_mode_scope(sec_uid, modes)
+        if scope_error:
+            raise RuntimeError(scope_error)
 
         user_info = await self._resolve_user_info(sec_uid, modes)
         if not user_info:
@@ -75,7 +76,8 @@ class UserDownloader(BaseDownloader):
 
         return result
 
-    def _validate_mode_scope(self, sec_uid: str, modes: List[str]) -> bool:
+    def _validate_mode_scope(self, sec_uid: str, modes: List[str]) -> Optional[str]:
+        """Return an error message when mode scope is invalid, else None."""
         normalized_modes = {str(mode or "").strip() for mode in modes}
         has_collect_mode = bool(normalized_modes & self.SELF_COLLECT_MODES)
         has_regular_mode = bool(normalized_modes - self.SELF_COLLECT_MODES)
@@ -86,22 +88,21 @@ class UserDownloader(BaseDownloader):
             # request reaches here the sidecar has already verified via
             # the cookie scope (``_resolve_viewer_sec_uid``) that the
             # caller is the logged-in user, so a real sec_uid + collect
-            # mode + collects_id is the legit my-content path. Without
-            # this branch ``download()`` would short-circuit and produce
-            # an empty DownloadResult, which the JobManager renders as
-            # the silent "已完成 0 项" failure.
+            # mode + collects_id is the legit my-content path.
             collects_id = (str(self.config.get("collects_id") or "")).strip()
             if not collects_id:
-                logger.error(
+                msg = (
                     "Modes collect/collectmix only support "
                     "/user/self?showTab=favorite_collection or "
                     "my-content 下载本收藏夹 (collects_id required)"
                 )
-                return False
+                logger.error(msg)
+                return msg
         if has_collect_mode and has_regular_mode:
-            logger.error("Modes collect/collectmix cannot be combined with post/like/mix/music")
-            return False
-        return True
+            msg = "Modes collect/collectmix cannot be combined with post/like/mix/music"
+            logger.error(msg)
+            return msg
+        return None
 
     def _filter_pinned_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if self._download_pinned_enabled():

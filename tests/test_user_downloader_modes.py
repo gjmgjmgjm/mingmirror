@@ -180,6 +180,8 @@ def test_user_downloader_supports_self_collect_mode(tmp_path, monkeypatch):
 
 
 def test_user_downloader_rejects_non_self_collect_mode(tmp_path, monkeypatch):
+    import pytest
+
     downloader = _build_downloader(tmp_path, mode=["collect"])
 
     async def _always_true(*_args, **_kwargs):
@@ -191,10 +193,9 @@ def test_user_downloader_rejects_non_self_collect_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "_should_download", _always_true)
     monkeypatch.setattr(downloader, "_download_aweme_assets", _download_ok)
 
-    result = asyncio.run(downloader.download({"sec_uid": "sec_uid_x"}))
+    with pytest.raises(RuntimeError, match="collects_id required|favorite_collection"):
+        asyncio.run(downloader.download({"sec_uid": "sec_uid_x"}))
 
-    assert result.total == 0
-    assert result.success == 0
     assert downloader.api_client.user_info_calls == []
     assert downloader.api_client.collect_calls == 0
 
@@ -284,6 +285,8 @@ def test_user_downloader_post_mode_uses_batch_db_insert(tmp_path, monkeypatch):
 
 
 def test_user_downloader_rejects_mixed_self_collect_and_regular_modes(tmp_path, monkeypatch):
+    import pytest
+
     downloader = _build_downloader(tmp_path, mode=["collect", "post"])
 
     async def _always_true(*_args, **_kwargs):
@@ -295,9 +298,8 @@ def test_user_downloader_rejects_mixed_self_collect_and_regular_modes(tmp_path, 
     monkeypatch.setattr(downloader, "_should_download", _always_true)
     monkeypatch.setattr(downloader, "_download_aweme_assets", _download_ok)
 
-    result = asyncio.run(downloader.download({"sec_uid": "self"}))
+    with pytest.raises(RuntimeError, match="cannot be combined"):
+        asyncio.run(downloader.download({"sec_uid": "self"}))
 
-    assert result.total == 0
-    assert result.success == 0
     assert downloader.api_client.user_info_calls == []
     assert downloader.api_client.collect_calls == 0

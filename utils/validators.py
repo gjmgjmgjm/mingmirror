@@ -11,6 +11,16 @@ def validate_url(url: str) -> bool:
         return False
 
 
+_WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
 def sanitize_filename(filename: str, max_length: int = 80) -> str:
     # 换行符 → 空格
     filename = filename.replace("\n", " ").replace("\r", " ")
@@ -25,6 +35,11 @@ def sanitize_filename(filename: str, max_length: int = 80) -> str:
 
     if len(filename) > max_length:
         filename = filename[:max_length].rstrip("._- ")
+
+    # Avoid Windows reserved device names (CON, PRN, AUX, NUL, COMn, LPTn).
+    stem = filename.split(".", 1)[0]
+    if stem.upper() in _WINDOWS_RESERVED:
+        filename = f"_{filename}"
 
     return filename or "untitled"
 

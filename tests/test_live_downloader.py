@@ -44,7 +44,7 @@ class _FakeSession:
         self._chunks = chunks
         self._status = status
 
-    def get(self, url, headers=None, timeout=None):
+    def get(self, url, headers=None, timeout=None, **kwargs):
         return _FakeStreamResponse(self._chunks, self._status)
 
 
@@ -183,7 +183,7 @@ class _IdleTimeoutSession:
     def __init__(self, chunks_before_timeout):
         self._chunks = chunks_before_timeout
 
-    def get(self, url, headers=None, timeout=None):
+    def get(self, url, headers=None, timeout=None, **kwargs):
         chunks = self._chunks
 
         class _Resp:
@@ -266,7 +266,7 @@ class _HeaderCapturingSession:
         self._chunks = chunks
         self.captured_headers = None
 
-    def get(self, url, headers=None, timeout=None):
+    def get(self, url, headers=None, timeout=None, **kwargs):
         self.captured_headers = dict(headers or {})
         chunks = self._chunks
 

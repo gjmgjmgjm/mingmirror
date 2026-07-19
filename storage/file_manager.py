@@ -171,6 +171,10 @@ class FileManager:
                         async for chunk in response.content.iter_chunked(8192):
                             await f.write(chunk)
                             written += len(chunk)
+                    if written == 0:
+                        logger.warning("Empty body for %s, treating as download failure", save_path.name)
+                        tmp_path.unlink(missing_ok=True)
+                        return False
                     if expected_size is not None and written != expected_size:
                         logger.warning(
                             "Size mismatch for %s: expected %d, got %d",

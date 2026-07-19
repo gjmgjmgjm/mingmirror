@@ -1,7 +1,7 @@
 import json
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 from urllib.parse import urlparse
@@ -211,6 +211,15 @@ class BaseDownloader(ABC):
             self._local_aweme_ids = set()
         self._local_aweme_ids.add(aweme_id)
 
+    def _cleanup_partial_files(self, files: List[Path]) -> None:
+        """Remove partially written media so failed downloads are not skipped later."""
+        for path in files:
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError as exc:
+                logger.debug("Failed to clean partial file %s: %s", path, exc)
+
     def _filter_by_time(self, aweme_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         start_time = self.config.get("start_time")
         end_time = self.config.get("end_time")
@@ -221,14 +230,19 @@ class BaseDownloader(ABC):
         start_ts = (
             int(datetime.strptime(start_time, "%Y-%m-%d").timestamp()) if start_time else None
         )
-        end_ts = int(datetime.strptime(end_time, "%Y-%m-%d").timestamp()) if end_time else None
+        # end_time is inclusive for the whole calendar day (local midnight next day exclusive).
+        end_ts = None
+        if end_time:
+            end_ts = int(
+                (datetime.strptime(end_time, "%Y-%m-%d") + timedelta(days=1)).timestamp()
+            )
 
         filtered: List[Dict[str, Any]] = []
         for aweme in aweme_list:
             create_time = aweme.get("create_time", 0)
             if start_ts is not None and create_time < start_ts:
                 continue
-            if end_ts is not None and create_time > end_ts:
+            if end_ts is not None and create_time >= end_ts:
                 continue
             filtered.append(aweme)
 
@@ -315,6 +329,7 @@ class BaseDownloader(ABC):
             if not await self._download_with_retry(
                 video_url, video_path, session, headers=video_headers
             ):
+                self._cleanup_partial_files(downloaded_files)
                 return False
             downloaded_files.append(video_path)
 
@@ -384,6 +399,7 @@ class BaseDownloader(ABC):
                         break
                 if not download_result:
                     logger.error(f"Failed downloading image {index} for aweme {aweme_id}")
+                    self._cleanup_partial_files(downloaded_files)
                     return False
 
             for index, live_url in enumerate(image_live_urls, start=1):
@@ -397,6 +413,7 @@ class BaseDownloader(ABC):
                 )
                 if not success:
                     logger.error(f"Failed downloading live image {index} for aweme {aweme_id}")
+                    self._cleanup_partial_files(downloaded_files)
                     return False
                 downloaded_files.append(live_path)
         else:
