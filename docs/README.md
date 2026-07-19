@@ -49,7 +49,20 @@
 
 ```bash
 python benchmarks/baziqa/zero_api_eval.py
+# 最近快照: benchmarks/baziqa/results/zero_api_baseline_2026-07-19.txt
 ```
+
+| 尺子（2026-07-19 全量） | 数值 | 说明 |
+|------------------------|------|------|
+| 排盘一致性 celebrity_extra | **100%** (200/200) | 预计算八字 vs `pillars_for_datetime` |
+| 年份 MCQ 纯规则 shortlist | top1 **30.6%** / top2 **51.1%** (n=186) | 跨 Contest8+MingLi+Celebrity50 |
+| · Contest8 only | top1 **45%** / top2 **61%** (n=44) | 与 LOO 标定一致 |
+| · MingLi | top1 **38%** / top2 **56%** (n=34) | |
+| · Celebrity50 | top1 **22%** / top2 **45%** (n=108) | 题型更杂、上限更低 |
+| 结构 critic | **31.2%** (n=186) | 大运/驿马 re-rank，约等于 top1 |
+| 生日 shuffle 对照 | **100%** (40/40) | +180 天特征必变 |
+
+> **诚实**：全源年份 shortlist top1≈31% **不是**结构 det；Contest8 切片 45% 不可外推到名人题。产品仍只承诺 A 层 det + 应期 shortlist 并列展示。
 
 **MiniMax Contest8 MCQ**（`abab6.5s-chat` + enhanced + soft shortlist + post-LLM trust, LOO）:
 

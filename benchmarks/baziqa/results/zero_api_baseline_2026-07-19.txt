@@ -1,0 +1,31 @@
+﻿================================================================
+Zero-API 命理评测（无需 DEEPSEEK_API_KEY）
+================================================================
+
+[库存]
+  contest8: 200
+  mingli: 160
+  celebrity50_mcq: 486
+  celebrity_extra_charts: 298
+  loaded_mcq (filtered sources=['contest8', 'mingli', 'celebrity50']): 846
+
+[排盘一致性] celebrity_extra 预计算八字 vs pillars_for_datetime
+  200/200 = 100.0%  (时辰 00:00 仅比对年月日柱)
+
+[年份 MCQ · 纯规则 shortlist + 结构 critic]
+  年份题: 191  可打分(有 shortlist): 186
+  top-1: 57/186 = 30.6%
+  top-2: 95/186 = 51.1%
+  critic: 58/186 = 31.2%
+    · contest8: top1=45% top2=61% critic=43% (n=44)
+    · mingli: top1=38% top2=56% critic=38% (n=34)
+    · celebrity50: top1=22% top2=45% critic=24% (n=108)
+
+[生日 shuffle 对照] +180 天结构特征应变化
+  changed 40/40 = 100.0%
+
+说明:
+  · 年份 top-2 是 shortlist 上限；critic 为纯规则重排，不调用 LLM。
+  · 非年份题不在此 harness 计分（需 LLM 或专项规则）。
+  · 结构层 gold 尺子仍用: python benchmarks/baziqa/accuracy_report.py
+================================================================

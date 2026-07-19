@@ -66,7 +66,8 @@ block = format_product_block(surf)  # Markdown
 | Contest8 n=40 峰值 | ~47% | **不可外推**（方差大） |
 | 年份 shortlist 离线 top-1 / top-2 | ~44% / ~60% | 规则层改进尺子 |
 | 排盘 / 用神 / 六亲 det | 100% / 100% / **100%** (46/46) | 结构层交付 |
-| 年份 shortlist LOO n=44 | top1 **45.5%** / top2 **61.4%**（soft top2 ~70%） | 规则层；非开放式准确率 |
+| 年份 shortlist LOO n=44 | top1 **45.5%** / top2 **61.4%**（soft top2 ~70%） | Contest8 切片；非开放式准确率 |
+| 零 API 全源年份 n=186 | top1 **30.6%** / top2 **51.1%** | Contest8+MingLi+Celebrity50；见 `zero_api_baseline_2026-07-19.txt` |
 | year critic（零 API re-rank） | 仅作 shortlist 偏好信号 | `meta.structural_critic`；禁止单年断言 |
 
 **不要**用 n=40 峰值对外宣传「准确率近半」。

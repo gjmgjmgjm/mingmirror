@@ -1,0 +1,32 @@
+{
+  "date": "2026-07-19",
+  "command": "python benchmarks/baziqa/zero_api_eval.py",
+  "inventory": {
+    "contest8": 200,
+    "mingli": 160,
+    "celebrity50_mcq": 486,
+    "celebrity_extra_charts": 298,
+    "loaded_mcq_all_sources": 846
+  },
+  "chart_consistency": {
+    "hit": 200,
+    "n": 200,
+    "pct": 100.0,
+    "note": "celebrity_extra precomputed bazi vs pillars_for_datetime (ymd only)"
+  },
+  "year_mcq_rule_shortlist": {
+    "year_questions": 191,
+    "scorable": 186,
+    "top1": 0.306,
+    "top2": 0.511,
+    "critic": 0.312,
+    "by_source": {
+      "contest8": {"top1": 0.45, "top2": 0.61, "critic": 0.43, "n": 44},
+      "mingli": {"top1": 0.38, "top2": 0.56, "critic": 0.38, "n": 34},
+      "celebrity50": {"top1": 0.22, "top2": 0.45, "critic": 0.24, "n": 108}
+    }
+  },
+  "birthday_shuffle": {"changed": 40, "n": 40, "pct": 100.0},
+  "liuqin_det": {"hit": 46, "n": 46, "pct": 100.0, "source": "validate_liuqin_det.py"},
+  "honesty": "Year MCQ shortlist is not open-ended event accuracy; structure det is separate."
+}
