@@ -29,6 +29,9 @@ from auth import CookieManager
 from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
 from core import DouyinAPIClient, DownloaderFactory, URLParser
+from server.accounts import AccountStore
+from server.auth_routes import register_auth_routes
+from server.concurrency import ConcurrencyHub, hub as _default_hub
 from server.jobs import JobManager, JobStatus
 from storage import FileManager
 from tools.qizheng.star_tables import resolve_dignity_table
@@ -573,6 +576,20 @@ class _ServerDeps:
         self.rate_limiter = RateLimiter(max_per_second=float(config.get("rate_limit", 2) or 2))
         self.retry_handler = RetryHandler(max_retries=int(config.get("retry_times", 3) or 3))
         self.queue_manager = QueueManager(max_workers=int(config.get("thread", 5) or 5))
+        # Shared TCP connector: reuse connections across download jobs.
+        self._aio_connector = None
+        try:
+            import aiohttp
+
+            thread = max(1, int(config.get("thread", 5) or 5))
+            self._aio_connector = aiohttp.TCPConnector(
+                limit=max(20, thread * 4),
+                limit_per_host=max(8, thread * 2),
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Shared aiohttp connector init failed: %s", exc)
         # Process-level Database for history / increase / dedup (align with CLI).
         self.database = None
         try:
@@ -592,6 +609,14 @@ class _ServerDeps:
             logger.warning("Server Database init failed: %s", exc)
         self._overrides: Dict[str, Any] = {}
         self._db_ready = False
+
+    async def aclose(self) -> None:
+        if self._aio_connector is not None:
+            try:
+                await self._aio_connector.close()
+            except Exception:
+                pass
+            self._aio_connector = None
 
     def apply_overrides(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
         """Apply runtime config overrides and return the effective values.
@@ -632,11 +657,15 @@ async def _execute_download(url: str, deps: "_ServerDeps") -> Dict[str, int]:
     """简化版 download_url：只负责执行并返回成功/失败计数。
 
     有意不复用 cli.main.download_url —— 后者绑定了 progress_display 的 rich 状态。
-    API client 仍按请求创建（aiohttp session 不跨请求复用）；其余重量级依赖从
-    _ServerDeps 共享。
+    API client session 按 job 创建；TCPConnector 在 _ServerDeps 进程级共享以提升并发。
     """
     proxy = deps.config.get("proxy")
-    async with DouyinAPIClient(deps.cookie_manager.get_cookies(), proxy=proxy) as api_client:
+    async with DouyinAPIClient(
+        deps.cookie_manager.get_cookies(),
+        proxy=proxy,
+        connector=deps._aio_connector,
+        own_connector=False,
+    ) as api_client:
         if is_short_url(url):
             resolved = await api_client.resolve_short_url(normalize_short_url(url))
             if not resolved:
@@ -689,6 +718,30 @@ def build_app(config: ConfigLoader) -> FastAPI:
         ),
     )
 
+    # Account store + concurrency hub (process-level)
+    account_store: Optional[AccountStore] = None
+    try:
+        acc_path = (
+            (config.get("mingmirror") or {}).get("account_db")
+            if isinstance(config.get("mingmirror"), dict)
+            else None
+        ) or "data/mingmirror_accounts.db"
+        account_store = AccountStore(Path(acc_path))
+    except Exception as exc:  # pragma: no cover
+        logger.warning("AccountStore init failed: %s", exc)
+
+    server_limits = config.get("server") or {}
+    if not isinstance(server_limits, dict):
+        server_limits = {}
+    concurrency_hub = ConcurrencyHub(
+        ai_limit=int(server_limits.get("ai_concurrency") or 4),
+        export_limit=int(server_limits.get("export_concurrency") or 2),
+    )
+    # Replace module default so other modules can import hub if needed
+    import server.concurrency as _conc_mod
+
+    _conc_mod.hub = concurrency_hub
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if deps.database is not None:
@@ -700,6 +753,13 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 deps.database = None
         yield
         await manager.shutdown()
+        if account_store is not None:
+            try:
+                account_store.purge_expired_sessions()
+                account_store.close()
+            except Exception:
+                pass
+        await deps.aclose()
         if deps.database is not None:
             try:
                 close = getattr(deps.database, "close", None)
@@ -716,10 +776,28 @@ def build_app(config: ConfigLoader) -> FastAPI:
     )
     app.state.job_manager = manager
     app.state.deps = deps
+    app.state.account_store = account_store
+    app.state.concurrency = concurrency_hub
+
+    def _merge_entitlement(user_id: str, device_id: str) -> None:
+        if _product_store is None or not user_id or not device_id:
+            return
+        key = f"user:{user_id}"
+        _product_store.merge_device_into_user(key, device_id)
+
+    register_auth_routes(
+        app,
+        get_store=lambda: account_store,
+        merge_entitlement=_merge_entitlement,
+    )
 
     @app.get("/api/v1/health")
-    async def health() -> Dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> Dict[str, Any]:
+        return {
+            "status": "ok",
+            "accounts": account_store is not None,
+            "concurrency": concurrency_hub.stats(),
+        }
 
     @app.post("/api/v1/download", response_model=JobResponse)
     async def create_job(req: DownloadRequest) -> JobResponse:
@@ -807,24 +885,28 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 values = [values]
             return [Path(v) for v in values if v]
 
-        result = await analyze_bazi(
-            req.bazi.strip(),
-            question=req.question,
-            gender=req.gender,
-            birth_date=req.birth_date,
-            birth_time=req.birth_time,
-            calendar_type=req.calendar_type,
-            cases_path=cases_path,
-            knowledge_base_path=knowledge_path,
-            extra_cases_paths=_to_paths("extra_cases_paths"),
-            extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
-            embedding_cache_path=embedding_cache_path,
-            knowledge_embedding_cache_path=knowledge_embedding_cache_path,
-            top_k=min(max(req.top_k, 1), 10),
-            api_key=ai_cfg.get("api_key") or None,
-            base_url=ai_cfg.get("base_url") or None,
-            model=ai_cfg.get("model") or None,
-        )
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyze_bazi(
+                    req.bazi.strip(),
+                    question=req.question,
+                    gender=req.gender,
+                    birth_date=req.birth_date,
+                    birth_time=req.birth_time,
+                    calendar_type=req.calendar_type,
+                    cases_path=cases_path,
+                    knowledge_base_path=knowledge_path,
+                    extra_cases_paths=_to_paths("extra_cases_paths"),
+                    extra_knowledge_base_paths=_to_paths("extra_knowledge_base_paths"),
+                    embedding_cache_path=embedding_cache_path,
+                    knowledge_embedding_cache_path=knowledge_embedding_cache_path,
+                    top_k=min(max(req.top_k, 1), 10),
+                    api_key=ai_cfg.get("api_key") or None,
+                    base_url=ai_cfg.get("base_url") or None,
+                    model=ai_cfg.get("model") or None,
+                )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return BaziAnalyzeResponse(bazi=req.bazi, result=result)
 
     @app.post("/api/v1/bazi/year-timing", response_model=BaziYearTimingResponse)
@@ -2003,16 +2085,20 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         from tools.bazi_ai.report_export import build_product_package
 
-        return build_product_package(
-            bazi,
-            gender=gender,
-            birth_info=birth_info,
-            chart_id=cid,
-            label=label,
-            include_auspicious=True,
-            liunian_start_year=opts.liunian_start_year,
-            liunian_years=opts.liunian_years,
-        )
+        try:
+            async with concurrency_hub.export_slot():
+                return build_product_package(
+                    bazi,
+                    gender=gender,
+                    birth_info=birth_info,
+                    chart_id=cid,
+                    label=label,
+                    include_auspicious=True,
+                    liunian_start_year=opts.liunian_start_year,
+                    liunian_years=opts.liunian_years,
+                )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/v1/bazi/export/package")
     async def export_bazi_package(
@@ -2023,19 +2109,23 @@ def build_app(config: ConfigLoader) -> FastAPI:
         _enforce_package_entitlement(device_id)
         from tools.bazi_ai.report_export import build_product_package
 
-        return build_product_package(
-            req.bazi.strip(),
-            gender=req.gender,
-            birth_info={
-                "birth_date": req.birth_date,
-                "birth_time": req.birth_time,
-                "calendar_type": req.calendar_type,
-            },
-            label=req.label or req.bazi.strip(),
-            include_auspicious=True,
-            liunian_start_year=req.liunian_start_year,
-            liunian_years=req.liunian_years,
-        )
+        try:
+            async with concurrency_hub.export_slot():
+                return build_product_package(
+                    req.bazi.strip(),
+                    gender=req.gender,
+                    birth_info={
+                        "birth_date": req.birth_date,
+                        "birth_time": req.birth_time,
+                        "calendar_type": req.calendar_type,
+                    },
+                    label=req.label or req.bazi.strip(),
+                    include_auspicious=True,
+                    liunian_start_year=req.liunian_start_year,
+                    liunian_years=req.liunian_years,
+                )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Product: analytics funnel + entitlements + demo charts

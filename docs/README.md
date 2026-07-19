@@ -18,6 +18,7 @@
 | [bazi_ai_error_analysis.md](./bazi_ai_error_analysis.md) | 命理 | 八字错误类型诊断、占比与修复优先级 |
 | [structural-trust-layer.md](./structural-trust-layer.md) | 命理 | 结构层 gold / 生产启动守卫 / device 隔离 |
 | [capability-boundary.md](./capability-boundary.md) | 命理 | **交付口径** A 结构 det / B 应期 shortlist / C 趋势；UI 红线 |
+| [account-system.md](./account-system.md) | 命理 | 邮箱账号 / 会话 / 设备关联 / 权益合并 / 并发限流 |
 | [resources_datasets_techniques.md](./resources_datasets_techniques.md) | 命理 | **全网专业技术、数据集、开源栈与 ROI 路线图** |
 | [sync-status.md](./sync-status.md) | 下载器 | CLI 版与桌面版(douyin-downloader-desktop)共享模块同步状态 |
 | [../README.md](../README.md) / [../README.zh-CN.md](../README.zh-CN.md) | 全局 | 用户快速开始 |

@@ -231,6 +231,38 @@ class ProductStore:
         rec.package_credits = max(0, rec.package_credits) + max(0, n)
         return self.save_entitlement(rec)
 
+    def merge_device_into_user(self, user_key: str, device_id: str) -> EntitlementRecord:
+        """Merge anonymous device entitlement into a user-scoped key.
+
+        ``user_key`` should be like ``user:<uuid>``. Takes max credits / longer pro.
+        """
+        user_key = (user_key or "").strip()
+        device_id = (device_id or "").strip()
+        if not user_key:
+            raise ValueError("user_key required")
+        user_rec = self.get_entitlement(user_key)
+        if not device_id or device_id == user_key:
+            return user_rec
+        dev = self.get_entitlement(device_id)
+        now = int(time.time())
+        # plan: prefer pro if either active
+        user_pro = user_rec.plan == "pro" and user_rec.expires_at > now
+        dev_pro = dev.plan == "pro" and dev.expires_at > now
+        if user_pro or dev_pro:
+            user_rec.plan = "pro"
+            user_rec.expires_at = max(
+                user_rec.expires_at if user_pro else 0,
+                dev.expires_at if dev_pro else 0,
+            )
+        user_rec.package_credits = max(
+            0, int(user_rec.package_credits or 0)
+        ) + max(0, int(dev.package_credits or 0))
+        # Zero device credits after merge to avoid double-spend (best-effort).
+        if dev.package_credits:
+            dev.package_credits = 0
+            self.save_entitlement(dev)
+        return self.save_entitlement(user_rec)
+
     def consume_credit(self, device_id: str) -> Dict[str, Any]:
         """Consume one package credit unless pro. Returns entitlement dict + ok."""
         rec = self.get_entitlement(device_id)

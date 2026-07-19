@@ -49,10 +49,21 @@ class DouyinAPIClient:
         "login_time",
     }
 
-    def __init__(self, cookies: Dict[str, str], proxy: Optional[str] = None):
+    def __init__(
+        self,
+        cookies: Dict[str, str],
+        proxy: Optional[str] = None,
+        *,
+        connector: Optional[aiohttp.BaseConnector] = None,
+        own_connector: bool = True,
+    ):
         self.cookies = sanitize_cookies(cookies or {})
         self.proxy = str(proxy or "").strip()
         self._session: Optional[aiohttp.ClientSession] = None
+        self._connector = connector
+        # When True, close() also closes the connector (default). Shared connectors
+        # from the server process set own_connector=False.
+        self._own_connector = own_connector if connector is None else own_connector
         self._browser_post_aweme_items: Dict[str, Dict[str, Any]] = {}
         self._browser_post_stats: Dict[str, int] = {}
         selected_ua = random.choice(_USER_AGENT_POOL)
@@ -77,16 +88,24 @@ class DouyinAPIClient:
 
     async def _ensure_session(self):
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                headers=self.headers,
-                cookies=self.cookies,
-                timeout=aiohttp.ClientTimeout(total=30),
-                raise_for_status=False,
-            )
+            kwargs: Dict[str, Any] = {
+                "headers": self.headers,
+                "cookies": self.cookies,
+                "timeout": aiohttp.ClientTimeout(total=30),
+                "raise_for_status": False,
+            }
+            if self._connector is not None:
+                kwargs["connector"] = self._connector
+            self._session = aiohttp.ClientSession(**kwargs)
 
     async def close(self):
         if self._session and not self._session.closed:
-            await self._session.close()
+            # When using a shared connector, do not close it with the session.
+            if self._connector is not None and not self._own_connector:
+                await self._session.close()
+            else:
+                await self._session.close()
+        self._session = None
 
     async def get_session(self) -> aiohttp.ClientSession:
         await self._ensure_session()

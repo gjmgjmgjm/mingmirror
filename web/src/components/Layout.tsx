@@ -15,9 +15,11 @@ import {
   CreditCard,
   LineChart,
   PencilLine,
+  UserRound,
 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useChart } from "../contexts/ChartContext";
+import { useAuth } from "../contexts/AuthContext";
 import type { ReactNode } from "react";
 
 interface LayoutProps {
@@ -36,6 +38,7 @@ const navItems = [
   { path: "/events", label: "校准", icon: Target },
   { path: "/cases", label: "案例", icon: Library },
   { path: "/pricing", label: "套餐", icon: CreditCard },
+  { path: "/account", label: "账号", icon: UserRound },
   { path: "/admin", label: "看板", icon: LineChart },
 ];
 
@@ -43,6 +46,7 @@ export default function Layout({ children }: LayoutProps) {
   const { theme, toggle } = useTheme();
   const location = useLocation();
   const { chart } = useChart();
+  const { user } = useAuth();
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -72,6 +76,16 @@ export default function Layout({ children }: LayoutProps) {
               <PencilLine className="h-3.5 w-3.5 text-ink-400" />
             </Link>
           )}
+          <Link
+            to="/account"
+            className="flex items-center gap-1.5 rounded-xl border border-ink-300/30 bg-ink-200/40 px-2.5 py-1.5 text-xs text-ink-700 transition hover:border-jade/40 dark:border-ink-600/30 dark:bg-ink-800/50 dark:text-ink-200"
+            title={user ? user.email : "登录 / 注册"}
+          >
+            <UserRound className="h-4 w-4 text-jade" />
+            <span className="hidden max-w-[7rem] truncate sm:inline">
+              {user ? user.display_name || user.email : "登录"}
+            </span>
+          </Link>
           <button
             type="button"
             onClick={toggle}

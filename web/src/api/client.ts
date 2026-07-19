@@ -205,12 +205,22 @@ export async function fetchJson<T>(
 ): Promise<T> {
   const { params, ...init } = options;
   const url = buildUrl(`${API_PREFIX}${path}`, params);
+  // Lazy import to avoid circular deps with auth helpers
+  let authHdrs: Record<string, string> = {};
+  try {
+    const { authHeaders } = await import("../lib/auth");
+    authHdrs = authHeaders();
+  } catch {
+    authHdrs = {};
+  }
   const response = await fetch(url, {
+    ...init,
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...authHdrs,
+      ...(init.headers as Record<string, string> | undefined),
     },
-    ...init,
   });
 
   if (!response.ok) {
@@ -219,6 +229,76 @@ export async function fetchJson<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+export interface AuthUserDto {
+  id: string;
+  email: string;
+  display_name: string;
+  created_at?: number;
+  updated_at?: number;
+  is_active?: boolean;
+}
+
+export interface AuthSessionResponse {
+  user: AuthUserDto;
+  token: string;
+  expires_at: number;
+  token_type: string;
+}
+
+export function registerAccount(payload: {
+  email: string;
+  password: string;
+  display_name?: string;
+  device_id?: string;
+}): Promise<AuthSessionResponse> {
+  return fetchJson<AuthSessionResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loginAccount(payload: {
+  email: string;
+  password: string;
+  device_id?: string;
+}): Promise<AuthSessionResponse> {
+  return fetchJson<AuthSessionResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function logoutAccount(): Promise<{ ok: boolean; logged_out?: boolean }> {
+  return fetchJson("/auth/logout", { method: "POST" });
+}
+
+export function fetchAuthMe(): Promise<{
+  user: AuthUserDto;
+  devices: string[];
+}> {
+  return fetchJson("/auth/me");
+}
+
+export function linkAuthDevice(device_id: string): Promise<{
+  ok: boolean;
+  devices: string[];
+}> {
+  return fetchJson("/auth/link-device", {
+    method: "POST",
+    body: JSON.stringify({ device_id }),
+  });
+}
+
+export function changeAuthPassword(payload: {
+  old_password: string;
+  new_password: string;
+}): Promise<AuthSessionResponse & { ok: boolean; message?: string }> {
+  return fetchJson("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface BaziBasicInfo {

@@ -1,5 +1,6 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
+import { AuthProvider } from "./contexts/AuthContext";
 import { ChartProvider } from "./contexts/ChartContext";
 import Dashboard from "./pages/Dashboard";
 import Chart from "./pages/Chart";
@@ -14,6 +15,7 @@ import Script from "./pages/Script";
 import Events from "./pages/Events";
 import Pricing from "./pages/Pricing";
 import Admin from "./pages/Admin";
+import Account from "./pages/Account";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -34,6 +36,7 @@ function AnimatedRoutes() {
         <Route path="/script" element={<Script />} />
         <Route path="/events" element={<Events />} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/account" element={<Account />} />
         <Route path="/admin" element={<Admin />} />
       </Routes>
     </div>
@@ -42,11 +45,13 @@ function AnimatedRoutes() {
 
 function App() {
   return (
-    <ChartProvider>
-      <Layout>
-        <AnimatedRoutes />
-      </Layout>
-    </ChartProvider>
+    <AuthProvider>
+      <ChartProvider>
+        <Layout>
+          <AnimatedRoutes />
+        </Layout>
+      </ChartProvider>
+    </AuthProvider>
   );
 }
 
