@@ -10,7 +10,7 @@ import {
 } from "../api/client";
 import CouncilLoader from "../components/CouncilLoader";
 import { SectionCard, InfoCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
-import { track } from "../lib/analytics";
+import { getDeviceId, track } from "../lib/analytics";
 
 const SYSTEMS = [
   { id: "bazi", label: "八字" },
@@ -122,7 +122,7 @@ export default function Council() {
     let cancelled = false;
     (async () => {
       try {
-        const latest = await fetchLatestCalibration(chartScopeId);
+        const latest = await fetchLatestCalibration(chartScopeId, getDeviceId());
         if (!cancelled) setSavedCalibration(latest);
       } catch {
         if (!cancelled) setSavedCalibration(null);
@@ -148,14 +148,20 @@ export default function Council() {
     setResult(null);
 
     try {
+      // Use wall-clock local datetime (no toISOString/UTC shift) so hour pillar
+      // matches Dashboard / Ziwei pages.
+      const birth_datetime =
+        chart.birthDate && chart.birthTime
+          ? `${chart.birthDate}T${chart.birthTime}`
+          : chart.birthDate
+            ? `${chart.birthDate}T00:00`
+            : undefined;
       const data = await councilDestiny({
         bazi: chart.bazi,
         gender: chart.gender,
-        birth_datetime:
-          chart.birthDate && chart.birthTime
-            ? new Date(`${chart.birthDate}T${chart.birthTime}`).toISOString()
-            : undefined,
+        birth_datetime,
         location: chart.location,
+        chart_id: chart.id || chartScopeId || undefined,
         systems: selectedSystems,
         strategy,
         question: question.trim() || undefined,

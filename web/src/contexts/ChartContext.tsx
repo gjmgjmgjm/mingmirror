@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { createChart as apiCreateChart } from "../api/client";
+import { getDeviceId } from "../lib/analytics";
 
 export interface LocationInfo {
   name?: string;
@@ -88,6 +89,7 @@ export function ChartProvider({ children }: { children: ReactNode }) {
             }
           : undefined,
         label: input.label || input.bazi,
+        device_id: getDeviceId(),
         reuse_existing: true,
       });
       const merged: ChartInfo = {

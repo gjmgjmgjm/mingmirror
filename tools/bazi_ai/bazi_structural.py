@@ -771,9 +771,14 @@ def _resolved_clash_pairs(dz_comp: dict) -> set:
     return out
 
 
-def _root_destroyed_at(pos: str, star_el: str, dz_comp: dict,
-                       resolved_clash: set = None,
-                       shishen: str = "") -> str:
+def _root_destroyed_at(
+    pos: str,
+    star_el: str,
+    dz_comp: dict,
+    resolved_clash: set = None,
+    shishen: str = "",
+    relation: str = "",
+) -> str:
     """Reason the root at branch *pos* is spoiled, or ''.
 
     六冲 shakes the root — but ONLY if the clash is not neutralized (冲被合解);
@@ -792,14 +797,15 @@ def _root_destroyed_at(pos: str, star_el: str, dz_comp: dict,
             poses = [t for t in tup if t in _LQ_POSITIONS]
             hua = tup[-1] if tup and tup[-1] in _LQ_ELEMENTS else ""
             if pos in poses and hua and hua != star_el:
-                # 印星月令合而不化: 三合/三会半合不破当令印根(母星常见);
-                # 不推广到财官,避免配偶 over-promotion.
-                if (
-                    pos == "月支"
-                    and key in ("三合", "三会")
-                    and shishen in ("正印", "偏印")
-                ):
-                    continue
+                # 月令半合/三合不破当令根:
+                #  - 印星: 母星常见
+                #  - 父星财: 月令本气为偏/正财时半合不破得令（甲寅+午半合火仍断父强）
+                # 不推广到配偶财官,避免 over-promotion.
+                if pos == "月支" and key in ("三合", "三会"):
+                    if shishen in ("正印", "偏印"):
+                        continue
+                    if relation in ("父亲",) and shishen in ("偏财", "正财"):
+                        continue
                 return f"合化{hua}"
     return ""
 
@@ -889,7 +895,12 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         dz_comp = profile.get("di_zhi_comprehensive", {})
         resolved_clash = _resolved_clash_pairs(dz_comp)
         destroyed = [
-            (rp, _root_destroyed_at(rp, star_el, dz_comp, resolved_clash, shishen))
+            (
+                rp,
+                _root_destroyed_at(
+                    rp, star_el, dz_comp, resolved_clash, shishen, relation
+                ),
+            )
             for rp in root_positions
         ]
         destroyed = [(rp, r) for rp, r in destroyed if r]
@@ -953,20 +964,23 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
 
         # 父星: 财生官杀于日支 → 父财被日支官杀所耗，父缘作弱
         # （例：甲日坐申七杀，年透偏财戊土生申金）。
+        # 例外：月令本气为父财（得令）时，日支官杀不废父星（甲子 丙寅 庚午…）。
         if is_father and strength == "强" and star_el:
-            day_br = branches[2] if len(branches) > 2 else ""
-            main_stems = _BRANCH_HIDDEN_STEMS.get(day_br, [])
-            if main_stems:
-                day_ss = shishen_for_stem(day_master, main_stems[0])
-                day_el = _ELEMENT.get(main_stems[0], "")
-                if (
-                    day_ss in ("七杀", "正官")
-                    and day_el
-                    and _GENERATING.get(star_el) == day_el
-                ):
-                    strength = "弱"
-                    support_notes.append("财生官杀于日支，父星被耗作弱")
-                    support_text = "、".join(support_notes)
+            father_deling = dedeling or ("月支" in intact_benqi)
+            if not father_deling:
+                day_br = branches[2] if len(branches) > 2 else ""
+                main_stems = _BRANCH_HIDDEN_STEMS.get(day_br, [])
+                if main_stems:
+                    day_ss = shishen_for_stem(day_master, main_stems[0])
+                    day_el = _ELEMENT.get(main_stems[0], "")
+                    if (
+                        day_ss in ("七杀", "正官")
+                        and day_el
+                        and _GENERATING.get(star_el) == day_el
+                    ):
+                        strength = "弱"
+                        support_notes.append("财生官杀于日支，父星被耗作弱")
+                        support_text = "、".join(support_notes)
 
         # 星被重度克泄→降级为弱(命理: 财被比劫夺 / 食伤被枭夺 / 官被食伤克).
         # 透干+本气真根时提高阈值, 避免官星透干有力却因全局火土多被误降.

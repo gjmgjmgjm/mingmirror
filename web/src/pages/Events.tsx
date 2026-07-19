@@ -14,7 +14,7 @@ import {
 } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
 import { SectionCard, EmptyState, PageHeader, ErrorPanel } from "../components/ui";
-import { track } from "../lib/analytics";
+import { getDeviceId, track } from "../lib/analytics";
 
 const EVENT_TYPE_LABELS: Record<EventType, string> = {
   study: "学业",
@@ -48,7 +48,11 @@ const EVENT_TYPES: EventType[] = [
 
 function todayInputValue() {
   const now = new Date();
-  return now.toISOString().slice(0, 10);
+  // Local calendar date — avoid UTC shift from toISOString() after 16:00 CST.
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export default function Events() {
@@ -69,10 +73,11 @@ export default function Events() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listEvents(chartScopeId);
+      const did = getDeviceId();
+      const data = await listEvents(chartScopeId, did);
       setEvents(data);
       try {
-        const latest = await fetchLatestCalibration(chartScopeId);
+        const latest = await fetchLatestCalibration(chartScopeId, did);
         setResult(latest);
       } catch {
         // 404 = no prior calibration; ignore
@@ -92,7 +97,7 @@ export default function Events() {
   const handleDelete = async (eventId: string) => {
     if (!chartScopeId) return;
     try {
-      await deleteEvent(chartScopeId, eventId);
+      await deleteEvent(chartScopeId, eventId, getDeviceId());
       await loadEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败");
@@ -105,11 +110,15 @@ export default function Events() {
     setSubmitting(true);
     setError(null);
     try {
-      await createEvent(chartScopeId, {
-        event_type: eventType,
-        happened_at: happenedAt,
-        description,
-      });
+      await createEvent(
+        chartScopeId,
+        {
+          event_type: eventType,
+          happened_at: happenedAt,
+          description,
+        },
+        getDeviceId()
+      );
       track("event_added", { event_type: eventType }, chartScopeId);
       setDescription("");
       await loadEvents();
@@ -127,7 +136,7 @@ export default function Events() {
     setError(null);
     setResult(null);
     try {
-      const data = await calibrateChart(chartScopeId);
+      const data = await calibrateChart(chartScopeId, getDeviceId());
       track("calibrate_run", { event_count: data.event_count }, chartScopeId);
       setResult(data);
     } catch (err) {

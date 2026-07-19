@@ -50,7 +50,7 @@ def _engine_strength(bazi: str, gender: str, subject: str) -> str:
 class TestLiuqinMissFixtures:
     def test_fixture_file_nonempty(self):
         rows = _load_fixtures()
-        assert len(rows) >= 1
+        # 0 rows is valid when live det is clean (all prior misses fixed).
         assert len(rows) <= 12  # sanity: should not explode
 
     def test_snapshot_engine_strength(self):

@@ -70,6 +70,13 @@ def test_father_caishengsha_day_branch_is_weak():
     ) == "弱"
 
 
+def test_father_yueling_banhe_still_strong():
+    """月令本气为偏财 + 寅午半合火：得令父星仍强（不全因半合废）。"""
+    prof = liuqin_profile("甲子 丙寅 庚午 丁亥", gender="male") or {}
+    father = prof.get("father") or {}
+    assert father.get("strength") == "强"
+
+
 def test_spouse_multi_stem_survives_hour_clash():
     """多透干财星 + 仅子午冲坏时支根 → 配偶仍强."""
     prof = liuqin_profile("壬戌 癸卯 戊午 壬子", gender="male") or {}

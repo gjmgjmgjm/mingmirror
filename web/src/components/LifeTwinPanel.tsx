@@ -29,11 +29,11 @@ import {
 } from "../api/client";
 import {
   canExportFullPackage,
-  consumePackageCreditAsync,
   getEntitlement,
   refreshEntitlementFromServer,
   type Entitlement,
 } from "../lib/entitlements";
+import { getDeviceId } from "../lib/analytics";
 
 const WEATHER_ICONS: Record<string, React.ReactNode> = {
   晴: <Sun className="h-7 w-7 text-gold" />,
@@ -175,14 +175,9 @@ export default function LifeTwinPanel() {
 
   const handleExport = async () => {
     setMsg(null);
+    // 服务端在 export 端点权威校验 + 扣次(非 pro);此处 canExportFullPackage 为 UI 预检。
     if (!canExportFullPackage(getEntitlement())) {
       setMsg("体验版需开通完整版或购买交付包次数，见下方套餐。");
-      return;
-    }
-    const ok = await consumePackageCreditAsync();
-    setEnt(getEntitlement());
-    if (!ok) {
-      setMsg("交付包次数已用尽，请前往套餐页。");
       return;
     }
     setExporting(true);
@@ -191,25 +186,36 @@ export default function LifeTwinPanel() {
         liunian_start_year: exportStartYear,
         liunian_years: exportYears,
       };
+      const deviceId = getDeviceId();
       const pkg =
         chart.id
-          ? await exportChartPackage(chart.id, rangeOpts)
-          : await exportBaziPackage({
-              bazi: chart.bazi,
-              gender: chart.gender || "male",
-              birth_date: chart.birthDate || "",
-              birth_time: chart.birthTime || "",
-              calendar_type: chart.calendarType || "solar",
-              label: chart.label || chart.bazi,
-              ...rangeOpts,
-            });
+          ? await exportChartPackage(chart.id, rangeOpts, deviceId)
+          : await exportBaziPackage(
+              {
+                bazi: chart.bazi,
+                gender: chart.gender || "male",
+                birth_date: chart.birthDate || "",
+                birth_time: chart.birthTime || "",
+                calendar_type: chart.calendarType || "solar",
+                label: chart.label || chart.bazi,
+                ...rangeOpts,
+              },
+              deviceId
+            );
       openHtmlPrint(pkg.html);
       downloadTextFile(pkg.markdown, `${pkg.filename_stem}.md`, "text/markdown");
+      // 服务端刚扣过次,刷新本地权益使额度显示同步
+      void refreshEntitlementFromServer().then(() => setEnt(getEntitlement()));
       setMsg(
         `已导出（流年 ${exportStartYear} 起 ${exportYears} 年，含「今年」高亮），打印页与 Markdown 已生成。`
       );
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "导出失败");
+      const msg = e instanceof Error ? e.message : "导出失败";
+      setMsg(
+        msg.includes("402")
+          ? "完整交付包需开通套餐或购买次数，请前往套餐页。"
+          : msg
+      );
     } finally {
       setExporting(false);
     }
