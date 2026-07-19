@@ -1,2 +1,1 @@
-{"bazi": "戊辰 癸亥 甲申 庚午", "gender": "male", "gender_raw": "男", "subject": "father", "master_strength": "弱", "engine_strength": "强", "support_text": "透干有力、有根", "note": "known miss: 年支本气+透干仍判强 vs master弱; 2026-07 father ym-root rule does not apply"}
-{"bazi": "壬戌 癸卯 戊午 壬子", "gender": "male", "gender_raw": "", "subject": "spouse", "master_strength": "强", "engine_strength": "弱", "support_text": "透干有力、有根、但时支逢冲坏根，实为虚浮无力", "note": "known miss: 时支冲坏根降弱 vs master强; keep conservative"}
+{"bazi": "甲子 丙寅 庚午 丁亥", "gender": "male", "gender_raw": "男", "subject": "father", "master_strength": "强", "engine_strength": "弱", "support_text": "透干有力、有根、但月支合化火坏根，实为虚浮无力、根不在年月父母宫侧，父星作弱", "note": "known miss after 2026-07 father ym-root: 月支合化坏根后无年月本气 → 弱 vs master强"}

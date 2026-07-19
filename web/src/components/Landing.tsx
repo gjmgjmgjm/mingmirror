@@ -31,7 +31,7 @@ interface LandingProps {
 const ACCURACY = [
   { label: "排盘（iztro gold）", value: "100%" },
   { label: "用神（穷通宝鉴）", value: "100%" },
-  { label: "六亲强弱 det", value: "~93%" },
+  { label: "六亲强弱 det", value: "~98%" },
   { label: "格局注入", value: "100%" },
 ];
 

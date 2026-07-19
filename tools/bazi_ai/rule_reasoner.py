@@ -205,9 +205,10 @@ def _restrains(a_gan: str, b_gan: str) -> bool:
 # 因此引擎只在大 margin 时覆盖 LLM（见 _best_candidate 的 margin 置信度）。
 # ---------------------------------------------------------------------------
 YEAR_SIGNAL_WEIGHTS: Dict[str, float] = {
-    # 2026-07-19 LOO recalib (rule_calibrate_v2): coordinate ascent on
-    # contest8 year-asking n=44.  Full top1 36.4%→45.5%, top2 54.5%→61.4%;
-    # soft-shortlist sim top2 60.6%→69.6% (fewer fires, higher quality).
+    # 2026-07-19 LOO recalib (rule_calibrate_v2): contest8 year-asking n=44.
+    # Full top1 45.5% / top2 61.4%; soft-shortlist top2 69.6% (fire≈23).
+    # Re-run same day: firerate_pos full top1 50% but sl_fire only 8 → reject
+    # for product shortlist; hybrid sl_top2 67.7% < production. Keep production.
     # —— 正向 ——
     "stem_wuhe_daymaster": 0.9,   # 天干五合（保持）
     "tian_kang_di_chong": 0.5,    # 天克地冲（保持）

@@ -58,3 +58,20 @@ def test_sibling_dual_star_labels():
         star = str(m.get("star") or "")
         if "/" in star:
             assert "比肩" in star or "劫财" in star
+
+
+def test_father_caishengsha_day_branch_is_weak():
+    """甲日坐申七杀 + 年透偏财 → 财生杀，父星弱."""
+    prof = liuqin_profile("戊辰 癸亥 甲申 庚午", gender="male") or {}
+    father = prof.get("father") or {}
+    assert father.get("strength") == "弱"
+    assert "财生官杀" in (father.get("support_text") or "") or father.get(
+        "strength"
+    ) == "弱"
+
+
+def test_spouse_multi_stem_survives_hour_clash():
+    """多透干财星 + 仅子午冲坏时支根 → 配偶仍强."""
+    prof = liuqin_profile("壬戌 癸卯 戊午 壬子", gender="male") or {}
+    spouse = prof.get("spouse") or {}
+    assert spouse.get("strength") == "强"

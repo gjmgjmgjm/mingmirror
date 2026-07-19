@@ -951,6 +951,23 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
                 support_notes.append("根不在年月父母宫侧，父星作弱")
                 support_text = "、".join(support_notes)
 
+        # 父星: 财生官杀于日支 → 父财被日支官杀所耗，父缘作弱
+        # （例：甲日坐申七杀，年透偏财戊土生申金）。
+        if is_father and strength == "强" and star_el:
+            day_br = branches[2] if len(branches) > 2 else ""
+            main_stems = _BRANCH_HIDDEN_STEMS.get(day_br, [])
+            if main_stems:
+                day_ss = shishen_for_stem(day_master, main_stems[0])
+                day_el = _ELEMENT.get(main_stems[0], "")
+                if (
+                    day_ss in ("七杀", "正官")
+                    and day_el
+                    and _GENERATING.get(star_el) == day_el
+                ):
+                    strength = "弱"
+                    support_notes.append("财生官杀于日支，父星被耗作弱")
+                    support_text = "、".join(support_notes)
+
         # 星被重度克泄→降级为弱(命理: 财被比劫夺 / 食伤被枭夺 / 官被食伤克).
         # 透干+本气真根时提高阈值, 避免官星透干有力却因全局火土多被误降.
         if strength == "强":
@@ -971,6 +988,20 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
             if _drain - _help >= _thr:
                 strength = "弱"
                 support_notes.append(f"但{star_el}星被克泄过重({_xie}/{_keme}/{_ike}党众),实为弱")
+                support_text = "、".join(support_notes)
+
+        # 配偶: 多透干财/官星时，仅时/日支逢冲坏根不必然假弱
+        # （例：戊日多透壬癸，子午冲坏时支本气根，大师仍断强）。
+        is_spouse = relation in ("配偶",)
+        if is_spouse and strength == "弱" and has_stem and has_branch_root:
+            stem_count = sum(1 for loc in unique_locs if loc["type"] == "天干")
+            only_chong = bool(destroyed) and all(
+                (r == "逢冲" or (isinstance(r, str) and r.startswith("逢冲")))
+                for _, r in destroyed
+            )
+            if stem_count >= 2 and only_chong and not intact_roots:
+                strength = "强"
+                support_notes.append("多透干，宫冲坏根仍存星力")
                 support_text = "、".join(support_notes)
 
         return {
@@ -1088,6 +1119,31 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         secondary_label="同参",
         merge_strength=False,
     )
+    # 配偶多透干救援：正偏财/官杀双星合参后，若多处天干见配偶星且仅宫冲坏根，
+    # 主星 strength 可能仍弱——合参后按合并 locations 再判一次。
+    if (
+        isinstance(spouse_merged, dict)
+        and spouse_merged.get("exists")
+        and spouse_merged.get("strength") == "弱"
+    ):
+        locs = spouse_merged.get("locations") or []
+        stem_n = sum(1 for loc in locs if loc.get("type") == "天干")
+        root_n = sum(
+            1
+            for loc in locs
+            if loc.get("type") in ("地支本气", "地支藏干")
+        )
+        if stem_n >= 2 and root_n >= 1:
+            sup = spouse_merged.get("support_text") or ""
+            if "逢冲" in sup and "合化" not in sup:
+                spouse_merged = dict(spouse_merged)
+                spouse_merged["strength"] = "强"
+                spouse_merged["support_text"] = (
+                    f"{sup};多透干合参，宫冲坏根仍存星力"
+                ).strip("; ")
+                desc = spouse_merged.get("description") or ""
+                spouse_merged["description"] = desc.replace("（弱）", "（强）")
+
     # 子女双星: 男命官杀皆子女, 女命食伤皆子女 — 互为同参标签
     son_primary = mapping["son"]
     dau_primary = mapping["daughter"]
