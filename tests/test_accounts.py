@@ -81,3 +81,43 @@ def test_entitlement_merge(tmp_path: Path):
     assert d["package_credits"] >= 3
     # device zeroed
     assert ps.get_entitlement("anon-dev").package_credits == 0
+
+
+def test_email_verify_and_password_reset(tmp_path: Path):
+    store = AccountStore(tmp_path / "acc3.db")
+    user, _ = store.register("v@e.com", "password12")
+    assert user.email_verified is False
+    tok = store.create_email_verification(user.id)
+    verified = store.verify_email(tok)
+    assert verified.email_verified is True
+    with pytest.raises(ValueError):
+        store.verify_email(tok)  # one-time
+
+    info = store.create_password_reset("v@e.com")
+    assert info and info["token"]
+    user2 = store.reset_password_with_token(info["token"], "newpassword99")
+    assert user2.email == "v@e.com"
+    _, sess = store.login("v@e.com", "newpassword99")
+    assert sess.token
+    store.close()
+
+
+def test_chart_user_id_claim(tmp_path: Path):
+    from tools.destiny.chart_store import ChartRecord, ChartStore
+
+    cs = ChartStore(tmp_path / "charts.db")
+    rec = ChartRecord.create(
+        bazi="甲子 乙丑 丙寅 丁卯", device_id="dev-x", user_id=""
+    )
+    cs.save(rec)
+    n = cs.claim_device_charts("user-1", "dev-x")
+    assert n == 1
+    got = cs.get(rec.id)
+    assert got is not None
+    assert got.user_id == "user-1"
+    listed = cs.list(user_id="user-1")
+    assert len(listed) == 1
+    cs.assert_device_access(rec.id, "other", user_id="user-1")
+    with pytest.raises(PermissionError):
+        cs.assert_device_access(rec.id, "other", user_id="user-2")
+    cs.close()

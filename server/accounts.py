@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MIN_PASSWORD = 8
 _SESSION_DAYS = 30
+_VERIFY_HOURS = 48
+_RESET_HOURS = 2
 
 
 def _now() -> int:
@@ -72,6 +74,7 @@ class UserRecord:
     created_at: int
     updated_at: int
     is_active: bool = True
+    email_verified: bool = False
 
     def to_public(self) -> Dict[str, Any]:
         return {
@@ -81,6 +84,7 @@ class UserRecord:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "is_active": self.is_active,
+            "email_verified": self.email_verified,
         }
 
 
@@ -115,7 +119,8 @@ class AccountStore:
                 display_name TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                is_active INTEGER NOT NULL DEFAULT 1
+                is_active INTEGER NOT NULL DEFAULT 1,
+                email_verified INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_account_email ON account_user(email);
 
@@ -136,8 +141,27 @@ class AccountStore:
                 PRIMARY KEY (user_id, device_id)
             );
             CREATE INDEX IF NOT EXISTS idx_device_id ON account_device(device_id);
+
+            CREATE TABLE IF NOT EXISTS account_token (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                used_at INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_token_user ON account_token(user_id);
+            CREATE INDEX IF NOT EXISTS idx_token_purpose ON account_token(purpose);
             """
         )
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(account_user)").fetchall()
+        }
+        if "email_verified" not in cols:
+            self._conn.execute(
+                "ALTER TABLE account_user ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -163,8 +187,9 @@ class AccountStore:
             self._conn.execute(
                 """
                 INSERT INTO account_user
-                (id, email, password_hash, display_name, created_at, updated_at, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                (id, email, password_hash, display_name, created_at, updated_at,
+                 is_active, email_verified)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0)
                 """,
                 (uid, email, hash_password(password), name, now, now),
             )
@@ -178,6 +203,7 @@ class AccountStore:
             created_at=now,
             updated_at=now,
             is_active=True,
+            email_verified=False,
         )
         session = self.create_session(uid, device_id=device_id)
         if device_id:
@@ -325,6 +351,7 @@ class AccountStore:
 
     @staticmethod
     def _row_user(row: sqlite3.Row) -> UserRecord:
+        keys = row.keys()
         return UserRecord(
             id=row["id"],
             email=row["email"],
@@ -332,8 +359,123 @@ class AccountStore:
             created_at=int(row["created_at"] or 0),
             updated_at=int(row["updated_at"] or 0),
             is_active=bool(row["is_active"]),
+            email_verified=bool(row["email_verified"])
+            if "email_verified" in keys
+            else False,
         )
 
     def entitlement_key(self, user_id: str) -> str:
         """Stable key for ProductStore entitlement rows owned by a user."""
         return f"user:{user_id}"
+
+    # ------------------------------------------------------------------
+    # Email verify + password reset (token flow; SMTP optional later)
+    # ------------------------------------------------------------------
+
+    def issue_token(self, user_id: str, purpose: str, *, hours: int = 24) -> str:
+        """Create a one-time token. purpose: verify_email | reset_password."""
+        purpose = (purpose or "").strip()
+        if purpose not in ("verify_email", "reset_password"):
+            raise ValueError("invalid token purpose")
+        now = _now()
+        token = secrets.token_urlsafe(32)
+        # Invalidate unused prior tokens of same purpose
+        self._conn.execute(
+            """
+            UPDATE account_token SET used_at = ?
+            WHERE user_id = ? AND purpose = ? AND used_at = 0
+            """,
+            (now, user_id, purpose),
+        )
+        self._conn.execute(
+            """
+            INSERT INTO account_token (token, user_id, purpose, expires_at, created_at, used_at)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            (token, user_id, purpose, now + max(1, hours) * 3600, now),
+        )
+        self._conn.commit()
+        return token
+
+    def create_email_verification(self, user_id: str) -> str:
+        return self.issue_token(user_id, "verify_email", hours=_VERIFY_HOURS)
+
+    def create_password_reset(self, email: str) -> Optional[Dict[str, str]]:
+        """Start password reset. Returns {token, email, user_id} or None if unknown.
+
+        Always-safe for callers: unknown email returns None without leaking.
+        """
+        try:
+            email = validate_email(email)
+        except ValueError:
+            return None
+        row = self._conn.execute(
+            "SELECT id, email FROM account_user WHERE email = ? AND is_active = 1",
+            (email,),
+        ).fetchone()
+        if row is None:
+            return None
+        token = self.issue_token(row["id"], "reset_password", hours=_RESET_HOURS)
+        return {"token": token, "email": row["email"], "user_id": row["id"]}
+
+    def _consume_token(self, token: str, purpose: str) -> str:
+        """Validate and mark token used; return user_id."""
+        token = (token or "").strip()
+        now = _now()
+        row = self._conn.execute(
+            """
+            SELECT * FROM account_token
+            WHERE token = ? AND purpose = ? AND used_at = 0 AND expires_at > ?
+            """,
+            (token, purpose, now),
+        ).fetchone()
+        if row is None:
+            raise ValueError("invalid or expired token")
+        self._conn.execute(
+            "UPDATE account_token SET used_at = ? WHERE token = ?",
+            (now, token),
+        )
+        self._conn.commit()
+        return row["user_id"]
+
+    def verify_email(self, token: str) -> UserRecord:
+        uid = self._consume_token(token, "verify_email")
+        now = _now()
+        self._conn.execute(
+            """
+            UPDATE account_user SET email_verified = 1, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, uid),
+        )
+        self._conn.commit()
+        user = self.get_user(uid)
+        if user is None:
+            raise ValueError("user not found")
+        return user
+
+    def reset_password_with_token(self, token: str, new_password: str) -> UserRecord:
+        new_password = validate_password(new_password)
+        uid = self._consume_token(token, "reset_password")
+        now = _now()
+        self._conn.execute(
+            """
+            UPDATE account_user SET password_hash = ?, updated_at = ?, email_verified = 1
+            WHERE id = ?
+            """,
+            (hash_password(new_password), now, uid),
+        )
+        self._conn.commit()
+        self.logout_all(uid)
+        user = self.get_user(uid)
+        if user is None:
+            raise ValueError("user not found")
+        return user
+
+    def request_email_verification(self, user_id: str) -> str:
+        user = self.get_user(user_id)
+        if user is None:
+            raise ValueError("user not found")
+        if user.email_verified:
+            raise ValueError("email already verified")
+        return self.create_email_verification(user_id)

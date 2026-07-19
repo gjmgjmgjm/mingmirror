@@ -32,6 +32,25 @@ class LinkDeviceRequest(BaseModel):
     device_id: str = Field(..., min_length=1)
 
 
+class RequestVerifyRequest(BaseModel):
+    """Authenticated resend; no body required but kept for future."""
+
+    pass
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=8)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=8)
+    new_password: str
+
+
 def _bearer_token(authorization: Optional[str], x_token: Optional[str] = None) -> str:
     if x_token and x_token.strip():
         return x_token.strip()
@@ -77,6 +96,7 @@ def register_auth_routes(
                 display_name=req.display_name,
                 device_id=req.device_id,
             )
+            verify_token = store.create_email_verification(user.id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if merge_entitlement and req.device_id:
@@ -89,6 +109,9 @@ def register_auth_routes(
             "token": session.token,
             "expires_at": session.expires_at,
             "token_type": "bearer",
+            # Dev / no-SMTP: return token so clients can complete verify without mail.
+            "email_verify_token": verify_token,
+            "email_verify_hint": "No SMTP configured; use email_verify_token with /auth/verify-email",
         }
 
     @app.post("/api/v1/auth/login")
@@ -170,3 +193,68 @@ def register_auth_routes(
             "token_type": "bearer",
             "message": "password changed; other sessions revoked",
         }
+
+    @app.post("/api/v1/auth/request-verify")
+    async def auth_request_verify(
+        authorization: Optional[str] = Header(default=None),
+        x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
+    ) -> Dict[str, Any]:
+        """Re-issue email verification token (no SMTP: token returned in JSON)."""
+        user, _ = _user_from_request(authorization, x_session_token)
+        try:
+            token = _store().request_email_verification(user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "email_verify_token": token,
+            "email_verify_hint": "No SMTP; POST token to /auth/verify-email",
+        }
+
+    @app.post("/api/v1/auth/verify-email")
+    async def auth_verify_email(req: VerifyEmailRequest) -> Dict[str, Any]:
+        try:
+            user = _store().verify_email(req.token)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "user": user.to_public()}
+
+    @app.post("/api/v1/auth/forgot-password")
+    async def auth_forgot_password(req: ForgotPasswordRequest) -> Dict[str, Any]:
+        """Always 200 to avoid email enumeration; token only when email exists."""
+        info = _store().create_password_reset(req.email)
+        body: Dict[str, Any] = {
+            "ok": True,
+            "message": "If the email is registered, a reset token was issued.",
+        }
+        # Dev / no-SMTP: include token when present so product can complete flow.
+        if info:
+            body["reset_token"] = info["token"]
+            body["reset_hint"] = "No SMTP; POST reset_token + new_password to /auth/reset-password"
+        return body
+
+    @app.post("/api/v1/auth/reset-password")
+    async def auth_reset_password(req: ResetPasswordRequest) -> Dict[str, Any]:
+        try:
+            user = _store().reset_password_with_token(req.token, req.new_password)
+            session = _store().create_session(user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "user": user.to_public(),
+            "token": session.token,
+            "expires_at": session.expires_at,
+            "token_type": "bearer",
+        }
+
+    @app.get("/api/v1/auth/oauth/{provider}")
+    async def auth_oauth_stub(provider: str) -> Dict[str, Any]:
+        """Placeholder for WeChat/Apple OAuth (not configured)."""
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"OAuth provider '{provider}' not configured. "
+                "Use email register/login. Configure provider keys to enable."
+            ),
+        )

@@ -468,6 +468,7 @@ class ChartResponse(BaseModel):
     location: Optional[Dict[str, Any]] = None
     label: str = ""
     device_id: str = ""
+    user_id: str = ""
     created_at: int = 0
     updated_at: int = 0
 
@@ -784,6 +785,13 @@ def build_app(config: ConfigLoader) -> FastAPI:
             return
         key = f"user:{user_id}"
         _product_store.merge_device_into_user(key, device_id)
+        # Claim device charts for cross-device list (chart store init later — deferred)
+        try:
+            store = getattr(app.state, "chart_store", None)
+            if store is not None:
+                store.claim_device_charts(user_id, device_id)
+        except Exception:
+            pass
 
     register_auth_routes(
         app,
@@ -966,24 +974,28 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 values = [values]
             return [Path(v) for v in values if v]
 
-        result = await analyze_bazi(
-            req.bazi.strip(),
-            question="",
-            gender=req.gender,
-            birth_date=req.birth_date,
-            birth_time=req.birth_time,
-            calendar_type=req.calendar_type,
-            cases_path=cases_path,
-            knowledge_base_path=knowledge_path,
-            extra_cases_paths=_report_paths("extra_cases_paths"),
-            extra_knowledge_base_paths=_report_paths("extra_knowledge_base_paths"),
-            embedding_cache_path=embedding_cache_path,
-            knowledge_embedding_cache_path=knowledge_embedding_cache_path,
-            top_k=min(max(req.top_k, 1), 10),
-            api_key=ai_cfg.get("api_key") or None,
-            base_url=ai_cfg.get("base_url") or None,
-            model=ai_cfg.get("model") or None,
-        )
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyze_bazi(
+                    req.bazi.strip(),
+                    question="",
+                    gender=req.gender,
+                    birth_date=req.birth_date,
+                    birth_time=req.birth_time,
+                    calendar_type=req.calendar_type,
+                    cases_path=cases_path,
+                    knowledge_base_path=knowledge_path,
+                    extra_cases_paths=_report_paths("extra_cases_paths"),
+                    extra_knowledge_base_paths=_report_paths("extra_knowledge_base_paths"),
+                    embedding_cache_path=embedding_cache_path,
+                    knowledge_embedding_cache_path=knowledge_embedding_cache_path,
+                    top_k=min(max(req.top_k, 1), 10),
+                    api_key=ai_cfg.get("api_key") or None,
+                    base_url=ai_cfg.get("base_url") or None,
+                    model=ai_cfg.get("model") or None,
+                )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         birth_info = {
             "birth_date": req.birth_date,
             "birth_time": req.birth_time,
@@ -1169,7 +1181,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
             cases_path=Path("./tools/qizheng/cases.jsonl"),
             dignity_table=dignity_table,
         )
-        result = await analyzer.analyze(chart_info, question=req.question)
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyzer.analyze(chart_info, question=req.question)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return QizhengAnalyzeResponse(bazi=bazi, result=result)
 
     @app.post("/api/v1/ziwei/analyze", response_model=ZiweiAnalyzeResponse)
@@ -1212,7 +1228,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
             base_url=ai_cfg.get("base_url") or None,
             model=ai_cfg.get("model") or None,
         )
-        result = await analyzer.analyze(chart_info, question=req.question)
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyzer.analyze(chart_info, question=req.question)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         out_bazi = bazi or str((result.get("basic_info") or {}).get("chart") or "")
         return ZiweiAnalyzeResponse(bazi=out_bazi, result=result)
 
@@ -1737,10 +1757,29 @@ def build_app(config: ConfigLoader) -> FastAPI:
             )
         return did
 
+    def _optional_user_id(request: Request) -> str:
+        if account_store is None:
+            return ""
+        auth = request.headers.get("Authorization") or ""
+        x_tok = request.headers.get("X-Session-Token") or ""
+        token = ""
+        if x_tok.strip():
+            token = x_tok.strip()
+        elif auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+        if not token:
+            return ""
+        user = account_store.get_user_by_token(token)
+        return user.id if user else ""
+
     def _assert_chart_device_access(
-        chart_id: str, device_id: str = "", *, required: bool = False
+        chart_id: str,
+        device_id: str = "",
+        *,
+        required: bool = False,
+        user_id: str = "",
     ) -> None:
-        """Enforce device ownership for UUID charts when owner is set."""
+        """Enforce device/user ownership for UUID charts when owner is set."""
         if _chart_store is None:
             return
         from tools.destiny.chart_store import is_chart_uuid
@@ -1751,7 +1790,10 @@ def build_app(config: ConfigLoader) -> FastAPI:
         did = (device_id or "").strip()
         try:
             _chart_store.assert_device_access(
-                key, did, allow_legacy_empty=not (_is_production and required)
+                key,
+                did,
+                allow_legacy_empty=not (_is_production and required),
+                user_id=user_id or "",
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="chart not found") from exc
@@ -1778,7 +1820,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def destiny_analyze(req: DestinyAnalyzeRequest) -> DestinyAnalyzeResponse:
         """Analyze a chart using one or more destiny systems."""
         analyzer, chart = _destiny_analyze(req, default_strategy="single")
-        result = await analyzer.analyze(chart)
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyzer.analyze(chart)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return DestinyAnalyzeResponse(
             bazi=result.get("bazi", chart.bazi),
             question=result.get("question", chart.question),
@@ -1795,7 +1841,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def destiny_council(req: DestinyCouncilRequest) -> DestinyAnalyzeResponse:
         """Run a multi-agent destiny council (debate/reflection) for a chart."""
         analyzer, chart = _destiny_analyze(req, default_strategy="debate")
-        result = await analyzer.analyze(chart)
+        try:
+            async with concurrency_hub.ai_slot():
+                result = await analyzer.analyze(chart)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return DestinyAnalyzeResponse(
             bazi=result.get("bazi", chart.bazi),
             question=result.get("question", chart.question),
@@ -1937,8 +1987,10 @@ def build_app(config: ConfigLoader) -> FastAPI:
     # Chart identity (product layer)
     # ------------------------------------------------------------------
     @app.post("/api/v1/charts", response_model=ChartResponse)
-    async def create_chart(req: ChartCreateRequest) -> ChartResponse:
-        """Create (or reuse) a persistent chart with UUID, scoped by device_id."""
+    async def create_chart(
+        request: Request, req: ChartCreateRequest
+    ) -> ChartResponse:
+        """Create (or reuse) a persistent chart with UUID, scoped by device/user."""
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
         from tools.destiny.chart_store import ChartRecord
@@ -1947,9 +1999,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
         if not bazi:
             raise HTTPException(status_code=400, detail="bazi is required")
         device_id = _require_device_id(req.device_id, soft=not _is_production)
+        user_id = _optional_user_id(request)
         if req.reuse_existing:
             existing = _chart_store.get_by_bazi(
-                bazi, device_id=device_id or None
+                bazi,
+                user_id=user_id or None,
+                device_id=device_id or None,
             )
             if existing is not None:
                 # Refresh birth metadata if provided
@@ -1964,6 +2019,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
                         existing.label = req.label
                     if device_id and not existing.device_id:
                         existing.device_id = device_id
+                    if user_id and not existing.user_id:
+                        existing.user_id = user_id
                     existing = _chart_store.save(existing)
                 return ChartResponse(**existing.to_dict())
         try:
@@ -1976,6 +2033,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 location=req.location,
                 label=req.label,
                 device_id=device_id,
+                user_id=user_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

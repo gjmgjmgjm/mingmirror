@@ -59,7 +59,10 @@ def test_health_endpoint(tmp_path):
     with TestClient(app) as client:
         resp = client.get("/api/v1/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "concurrency" in data
+        assert "accounts" in data
 
 
 def test_download_endpoint_creates_job(tmp_path, monkeypatch):

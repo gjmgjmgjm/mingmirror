@@ -12,7 +12,11 @@
 | 当前用户 | `GET /api/v1/auth/me` |
 | 关联设备 | `POST /api/v1/auth/link-device`（登录时自动） |
 | 改密 | `POST /api/v1/auth/change-password`（吊销其它会话） |
+| 邮箱验证 | `request-verify` · `verify-email`（无 SMTP 时 JSON 返回 token） |
+| 密码重置 | `forgot-password` · `reset-password`（无 SMTP 时返回 reset_token） |
+| OAuth | `GET /auth/oauth/{provider}` → **501** 占位（微信/Apple 待配密钥） |
 | 权益合并 | 登录时将 `device_id` 匿名权益合并到 `user:<id>` |
+| 命盘绑定 | `chart.user_id`；登录 claim 设备下命盘；列表可按 user 跨设备 |
 
 ## 安全
 
