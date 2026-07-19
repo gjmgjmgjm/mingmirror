@@ -8,7 +8,6 @@ packages.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -33,13 +32,18 @@ class ChartInfo:
             "latitude": 39.9042,
             "timezone": "Asia/Shanghai",
         }
-        return {
+        payload: Dict[str, Any] = {
             "bazi": self.bazi,
             "gender": self.gender or "male",
-            "birth_datetime": self.birth_datetime
-            or datetime.now().isoformat(timespec="seconds"),
             "location": location,
         }
+        if self.birth_datetime:
+            payload["birth_datetime"] = self.birth_datetime
+        elif self.bazi:
+            # Structure-only path: engine can still chart from four pillars
+            # without inventing a fake civil birth time.
+            payload["birth_datetime"] = ""
+        return payload
 
 
 @dataclass

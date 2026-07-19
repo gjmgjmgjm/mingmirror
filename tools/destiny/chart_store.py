@@ -38,6 +38,8 @@ class ChartRecord:
     calendar_type: str = "solar"
     location: Optional[Dict[str, Any]] = None
     label: str = ""
+    # Anonymous device isolation (browser localStorage id). Empty = legacy/public.
+    device_id: str = ""
     created_at: int = 0
     updated_at: int = 0
 
@@ -56,6 +58,7 @@ class ChartRecord:
         location: Optional[Dict[str, Any]] = None,
         label: str = "",
         chart_id: Optional[str] = None,
+        device_id: str = "",
     ) -> "ChartRecord":
         now = int(time.time())
         bazi = (bazi or "").strip()
@@ -70,6 +73,7 @@ class ChartRecord:
             calendar_type=(calendar_type or "solar").strip() or "solar",
             location=location,
             label=(label or "").strip() or bazi,
+            device_id=(device_id or "").strip(),
             created_at=now,
             updated_at=now,
         )
@@ -99,13 +103,24 @@ class ChartStore:
                 calendar_type TEXT NOT NULL DEFAULT 'solar',
                 location_json TEXT,
                 label TEXT NOT NULL DEFAULT '',
+                device_id TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_chart_bazi ON chart(bazi);
             CREATE INDEX IF NOT EXISTS idx_chart_updated ON chart(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_chart_device ON chart(device_id);
             """
         )
+        # Incremental migration for DBs created before device_id.
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(chart)").fetchall()
+        }
+        if "device_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE chart ADD COLUMN device_id TEXT NOT NULL DEFAULT ''"
+            )
         self._conn.commit()
 
     def _row_to_record(self, row: sqlite3.Row) -> ChartRecord:
@@ -116,6 +131,7 @@ class ChartStore:
                 loc = json.loads(raw)
             except json.JSONDecodeError:
                 loc = None
+        keys = row.keys()
         return ChartRecord(
             id=row["id"],
             bazi=row["bazi"],
@@ -125,6 +141,7 @@ class ChartStore:
             calendar_type=row["calendar_type"] or "solar",
             location=loc,
             label=row["label"] or row["bazi"],
+            device_id=(row["device_id"] if "device_id" in keys else "") or "",
             created_at=int(row["created_at"] or 0),
             updated_at=int(row["updated_at"] or 0),
         )
@@ -137,8 +154,8 @@ class ChartStore:
             """
             INSERT INTO chart
             (id, bazi, gender, birth_date, birth_time, calendar_type,
-             location_json, label, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             location_json, label, device_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 bazi=excluded.bazi,
                 gender=excluded.gender,
@@ -147,6 +164,7 @@ class ChartStore:
                 calendar_type=excluded.calendar_type,
                 location_json=excluded.location_json,
                 label=excluded.label,
+                device_id=excluded.device_id,
                 updated_at=excluded.updated_at
             """,
             (
@@ -160,6 +178,7 @@ class ChartStore:
                 if chart.location
                 else None,
                 chart.label or chart.bazi,
+                chart.device_id or "",
                 chart.created_at,
                 chart.updated_at,
             ),
@@ -174,25 +193,71 @@ class ChartStore:
         row = cur.fetchone()
         return self._row_to_record(row) if row else None
 
-    def get_by_bazi(self, bazi: str) -> Optional[ChartRecord]:
-        """Most recently updated chart with this exact bazi string."""
-        cur = self._conn.execute(
-            """
-            SELECT * FROM chart WHERE bazi = ?
-            ORDER BY updated_at DESC LIMIT 1
-            """,
-            (bazi.strip(),),
-        )
+    def get_by_bazi(
+        self, bazi: str, *, device_id: Optional[str] = None
+    ) -> Optional[ChartRecord]:
+        """Most recently updated chart with this exact bazi string.
+
+        When ``device_id`` is provided, only charts owned by that device match
+        (reuse must not cross devices).
+        """
+        bazi = bazi.strip()
+        did = (device_id or "").strip()
+        if did:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM chart WHERE bazi = ? AND device_id = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (bazi, did),
+            )
+        else:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM chart WHERE bazi = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (bazi,),
+            )
         row = cur.fetchone()
         return self._row_to_record(row) if row else None
 
-    def list(self, limit: int = 50) -> List[ChartRecord]:
+    def list(
+        self, limit: int = 50, *, device_id: Optional[str] = None
+    ) -> List[ChartRecord]:
         limit = max(1, min(int(limit or 50), 200))
-        cur = self._conn.execute(
-            "SELECT * FROM chart ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
-        )
+        did = (device_id or "").strip()
+        if did:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM chart WHERE device_id = ?
+                ORDER BY updated_at DESC LIMIT ?
+                """,
+                (did, limit),
+            )
+        else:
+            cur = self._conn.execute(
+                "SELECT * FROM chart ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            )
         return [self._row_to_record(r) for r in cur.fetchall()]
+
+    def assert_device_access(
+        self, chart_id: str, device_id: str, *, allow_legacy_empty: bool = True
+    ) -> ChartRecord:
+        """Raise PermissionError if device may not access this chart UUID."""
+        rec = self.get(chart_id)
+        if rec is None:
+            raise KeyError("chart not found")
+        did = (device_id or "").strip()
+        owner = (rec.device_id or "").strip()
+        if not owner:
+            if allow_legacy_empty:
+                return rec
+            raise PermissionError("chart has no device owner")
+        if not did or did != owner:
+            raise PermissionError("chart not owned by this device")
+        return rec
 
     def delete(self, chart_id: str) -> bool:
         cur = self._conn.execute(

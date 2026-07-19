@@ -5,11 +5,31 @@ import asyncio
 
 from tools.ziwei.chart import (
     chart_from_birth,
+    five_element_bureau,
+    life_palace_stem,
     liunian_years,
     structural_chart,
     yearly_bundle,
 )
 from tools.ziwei.engine import ZiWeiAnalyzer
+
+
+def test_life_palace_nayin_bureau():
+    """五行局 must use 命宫干支纳音 (五虎遁), not year pillar alone."""
+    # 甲年 + 命宫巳 → 己巳 → 大林木 → 木三局
+    assert life_palace_stem("甲", "巳") == "己"
+    el, bureau = five_element_bureau(year_stem="甲", life_palace="巳")
+    assert el == "木" and bureau == 3
+    # 乙年 + 命宫寅 → 戊寅 → 城头土 → 土五局
+    assert life_palace_stem("乙", "寅") == "戊"
+    el2, b2 = five_element_bureau(year_stem="乙", life_palace="寅")
+    assert el2 == "土" and b2 == 5
+    # structural_chart must apply life-palace bureau
+    chart = structural_chart("乙卯 戊寅 庚子 丙子", gender="male", day_of_month=15)
+    assert chart is not None
+    assert chart["bureau_source"] == "life_palace_nayin"
+    assert chart["five_element"] == el2
+    assert chart["bureau"] == b2
 
 
 def test_structural_chart_deterministic():

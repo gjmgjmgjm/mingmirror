@@ -186,6 +186,29 @@ class ZiWeiAnalyzer:
             birth_date = bdt[:10]
         birth_date = chart_info.get("birth_date") or birth_date
 
+        # Derive four pillars from birth datetime when only datetime is provided.
+        if not bazi and isinstance(bdt, str) and bdt.strip():
+            try:
+                from tools.bazi_ai.calendar import pillars_for_datetime
+
+                raw = bdt.strip()
+                if raw.endswith("Z"):
+                    raw = raw[:-1] + "+00:00"
+                from datetime import datetime as _dt
+
+                dt = _dt.fromisoformat(raw)
+                # Prefer wall-clock local components when timezone-aware (naive intended).
+                if dt.tzinfo is not None:
+                    dt = dt.replace(tzinfo=None)
+                pillars = pillars_for_datetime(dt)
+                bazi = " ".join(
+                    pillars[k] for k in ("year", "month", "day", "hour") if pillars.get(k)
+                )
+                if not birth_date and len(raw) >= 10:
+                    birth_date = raw[:10]
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug("Failed to derive bazi from birth_datetime: %s", exc)
+
         struct = chart_from_birth(bazi, gender=str(gender), birth_date=birth_date) if bazi else None
         refs = [c.get("birth_datetime") for c in similar_cases[:2] if c.get("birth_datetime")]
 

@@ -13,6 +13,7 @@ class TestChartStore:
             birth_date="1990-02-15",
             birth_time="12:00",
             label="测试命盘",
+            device_id="dev-1",
         )
         assert is_chart_uuid(rec.id)
         store.save(rec)
@@ -20,8 +21,9 @@ class TestChartStore:
         assert got is not None
         assert got.bazi == "乙卯 戊寅 庚子 丙子"
         assert got.birth_date == "1990-02-15"
-        assert store.get_by_bazi("乙卯 戊寅 庚子 丙子").id == rec.id
-        assert len(store.list()) >= 1
+        assert got.device_id == "dev-1"
+        assert store.get_by_bazi("乙卯 戊寅 庚子 丙子", device_id="dev-1").id == rec.id
+        assert len(store.list(device_id="dev-1")) >= 1
         assert store.resolve_bazi(rec.id) == rec.bazi
         assert store.resolve_bazi(rec.bazi) == rec.bazi
         assert store.delete(rec.id) is True
@@ -35,6 +37,23 @@ class TestChartStore:
         rec.label = "新标签"
         store.save(rec)
         assert store.get(rec.id).label == "新标签"
+        store.close()
+
+    def test_device_isolation(self, tmp_path):
+        store = ChartStore(tmp_path / "c.db")
+        a = ChartRecord.create(bazi="甲子 乙丑 丙寅 丁卯", device_id="A")
+        b = ChartRecord.create(bazi="甲子 乙丑 丙寅 丁卯", device_id="B")
+        store.save(a)
+        store.save(b)
+        assert store.get_by_bazi("甲子 乙丑 丙寅 丁卯", device_id="A").id == a.id
+        assert store.get_by_bazi("甲子 乙丑 丙寅 丁卯", device_id="B").id == b.id
+        assert store.list(device_id="A")[0].id == a.id
+        store.assert_device_access(a.id, "A")
+        try:
+            store.assert_device_access(a.id, "B")
+            assert False, "expected PermissionError"
+        except PermissionError:
+            pass
         store.close()
 
 
@@ -137,16 +156,31 @@ def test_server_chart_and_export(tmp_path):
     lst = client.get(f"/api/v1/charts/{chart_id}/events")
     assert len(lst.json()) == 1
 
-    # product package
-    pkg = client.post(f"/api/v1/charts/{chart_id}/export/package")
+    # 命书交付包导出闸门:无 device_id / 无权益 → 402
+    gated = client.post(f"/api/v1/charts/{chart_id}/export/package")
+    assert gated.status_code == 402
+
+    # 开通测试权益(demo-pro)使闸门放行
+    device = "test-device-chart-export"
+    act = client.post(
+        "/api/v1/product/entitlement/activate",
+        json={"device_id": device, "action": "pro", "code": "demo-pro", "days": 30},
+    )
+    assert act.status_code == 200
+
+    # product package(带 device_id)
+    pkg = client.post(
+        f"/api/v1/charts/{chart_id}/export/package", params={"device_id": device}
+    )
     assert pkg.status_code == 200
     body = pkg.json()
     assert "markdown" in body and "html" in body
     assert body["meta"]["chart_id"] == chart_id
 
-    # raw bazi export
+    # raw bazi export(带 device_id)
     pkg2 = client.post(
         "/api/v1/bazi/export/package",
+        params={"device_id": device},
         json={"bazi": "乙卯 戊寅 庚子 丙子", "gender": "male"},
     )
     assert pkg2.status_code == 200

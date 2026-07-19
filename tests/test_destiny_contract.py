@@ -21,7 +21,12 @@ def test_chart_info_to_dict():
 def test_domain_conclusion_to_dict():
     conclusion = DomainConclusion(domain="career", text="事业顺遂", confidence="high")
     data = conclusion.to_dict()
-    assert data == {"domain": "career", "text": "事业顺遂", "confidence": "high"}
+    assert data == {
+        "domain": "career",
+        "text": "事业顺遂",
+        "confidence": "high",
+        "system": "",
+    }
 
 
 def test_system_result_to_dict():

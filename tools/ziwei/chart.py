@@ -15,13 +15,28 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 _ZHI = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
+_STEMS = list("甲乙丙丁戊己庚辛壬癸")
 _PALACE_NAMES = [
     "命宫", "兄弟", "夫妻", "子女", "财帛", "疾厄",
     "迁移", "仆役", "官禄", "田宅", "福德", "父母",
 ]
 _PALACE_BRANCHES = ["寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥", "子", "丑"]
 
+# 水二、木三、金四、土五、火六
 _NAYIN_BUREAU = {"金": 4, "水": 2, "火": 6, "土": 5, "木": 3}
+# 五虎遁：年干 → 寅宫天干（甲己丙作首 …）
+_WUHU_YIN_STEM = {
+    "甲": "丙",
+    "己": "丙",
+    "乙": "戊",
+    "庚": "戊",
+    "丙": "庚",
+    "辛": "庚",
+    "丁": "壬",
+    "壬": "壬",
+    "戊": "甲",
+    "癸": "甲",
+}
 _NAYIN = {
     "甲子": "金", "乙丑": "金", "丙寅": "火", "丁卯": "火",
     "戊辰": "木", "己巳": "木", "庚午": "土", "辛未": "土",
@@ -165,9 +180,43 @@ def life_body_palace(month_branch: str, hour_branch: str) -> Tuple[str, str]:
     return _PALACE_BRANCHES[life_idx], _PALACE_BRANCHES[body_idx]
 
 
-def five_element_bureau(year_pillar: str) -> Tuple[str, int]:
-    el = _NAYIN.get(year_pillar, "土")
-    return el, _NAYIN_BUREAU.get(el, 5)
+def life_palace_stem(year_stem: str, life_palace: str) -> str:
+    """五虎遁：由年干推命宫天干。
+
+    寅宫起五虎遁首，再顺数到命宫地支。
+    """
+    yin_stem = _WUHU_YIN_STEM.get((year_stem or "")[:1], "丙")
+    if life_palace not in _PALACE_BRANCHES:
+        return yin_stem
+    offset = _PALACE_BRANCHES.index(life_palace)
+    return _STEMS[(_STEMS.index(yin_stem) + offset) % 10]
+
+
+def five_element_bureau(
+    year_pillar: str = "",
+    *,
+    year_stem: str = "",
+    life_palace: str = "",
+) -> Tuple[str, int]:
+    """定五行局：命宫天干（年干五虎遁）+ 命宫地支 → 纳音 → 局数。
+
+    正统斗数以「命宫干支纳音」定水二/木三/金四/土五/火六局，
+    **不是**直接取年柱纳音。
+
+    兼容旧调用：仅传 ``year_pillar`` 且无命宫时，退回年柱纳音（并应尽快迁移）。
+    """
+    stem = (year_stem or (year_pillar[:1] if year_pillar else "")).strip()
+    palace = (life_palace or "").strip()
+    if stem and palace and palace in _PALACE_BRANCHES:
+        palace_gz = life_palace_stem(stem, palace) + palace
+        el = _NAYIN.get(palace_gz, "土")
+        return el, _NAYIN_BUREAU.get(el, 5)
+
+    # Legacy fallback: year pillar nayin only (incorrect for real charts).
+    if year_pillar and len(year_pillar) >= 2:
+        el = _NAYIN.get(year_pillar[:2], "土")
+        return el, _NAYIN_BUREAU.get(el, 5)
+    return "土", 5
 
 
 def ziwei_branch(day: int, bureau: int) -> str:
@@ -342,7 +391,7 @@ def structural_chart(
     hour_branch = hour_p[1]
 
     life, body = life_body_palace(month_branch, hour_branch)
-    el, bureau = five_element_bureau(year_p)
+    el, bureau = five_element_bureau(year_stem=year_stem, life_palace=life)
     zw = ziwei_branch(day_of_month, bureau)
     tf = tianfu_branch_for_ziwei(zw)
 
@@ -440,10 +489,11 @@ def structural_chart(
         "system": "ziwei",
         "trust": "certain_simplified",
         "note": (
-            "结构层含：命身宫、五行局、紫微/天府主星、年干四化、"
+            "结构层含：命身宫、五行局(命宫干支纳音/五虎遁)、紫微/天府主星、年干四化、"
             "辅星(辅弼昌曲魁钺禄马)、煞星(羊陀火铃空劫简化)、大限十年运。"
             "亮度与流派差未展开；日数未知默认十五。"
         ),
+        "bureau_source": "life_palace_nayin",
         "gender": gender_key,
         "year_pillar": year_p,
         "five_element": el,
