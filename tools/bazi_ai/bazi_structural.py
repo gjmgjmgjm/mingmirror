@@ -879,6 +879,12 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         root_positions = [loc["position"] for loc in unique_locs
                           if loc["type"] in ("地支本气", "地支藏干") and loc["position"] in _LQ_POSITIONS]
         has_branch_root = bool(root_positions)
+        # 本气根 positions (得令 / 强根只认本气, 藏干月支不算「月令真根」)
+        benqi_positions = {
+            loc["position"]
+            for loc in unique_locs
+            if loc["type"] == "地支本气" and loc["position"] in _LQ_POSITIONS
+        }
         star_el = _star_element(day_master, shishen)
         dz_comp = profile.get("di_zhi_comprehensive", {})
         resolved_clash = _resolved_clash_pairs(dz_comp)
@@ -889,7 +895,17 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         destroyed = [(rp, r) for rp, r in destroyed if r]
         destroyed_set = {rp for rp, _ in destroyed}
         intact_roots = [rp for rp in root_positions if rp not in destroyed_set]
-        dedeling = ("月支" in root_positions and "月支" in intact_roots)
+        intact_benqi = [rp for rp in intact_roots if rp in benqi_positions]
+        # 得令:
+        #  - 月支本气未坏 → 真得令
+        #  - 月支仅藏干: 仅当另有本气真根未坏时才算「有令有根」(避免母星假强)
+        dedeling_benqi = "月支" in intact_benqi
+        dedeling_cang = (
+            "月支" in intact_roots
+            and "月支" not in intact_benqi
+            and bool(intact_benqi)
+        )
+        dedeling = dedeling_benqi or dedeling_cang
 
         support_notes = []
         if has_stem:
@@ -907,15 +923,26 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
         support_text = "、".join(support_notes) if support_notes else "虚浮无根"
 
         # Effective strength (master-like binary, 中→弱 tightened).
-        if intact_roots and (has_stem or dedeling):
+        # 子女更严: 强必须透干+未坏根 (仅月令本气无透干 → 弱, 避免食伤「有根假强」).
+        is_child = relation in ("儿子", "女儿", "子女")
+        if is_child:
+            if intact_roots and has_stem:
+                strength = "强"
+            else:
+                strength = "弱"
+        elif intact_roots and (has_stem or dedeling):
             strength = "强"    # intact root + (透干 or 得令) → 强
         elif has_stem and not intact_roots and not has_branch_root:
             strength = "弱"    # 透干无根 → 虚浮 → 弱
         else:
             strength = "弱"    # 有根无透干非得令→弱; 虚浮→弱; 根全坏→弱
 
+        # Consistency: all roots destroyed → never leave as 强
+        if strength == "强" and has_branch_root and not intact_roots:
+            strength = "弱"
+
         # 星被重度克泄→降级为弱(命理: 财被比劫夺 / 食伤被枭夺 / 官被食伤克).
-        # 修模式B: 六亲星透干有根 → engine 判强, 但星被耗泄、master 判弱.
+        # 透干+本气真根时提高阈值, 避免官星透干有力却因全局火土多被误降.
         if strength == "强":
             _w = dict.fromkeys(_ELEMENT.values(), 0.0)
             for _s in stems:
@@ -928,9 +955,13 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
             _ike = _RESTRAINING[star_el]                 # 星克=财(耗)
             _help = _w[star_el] + _w.get(_yin, 0.0)
             _drain = _w.get(_xie, 0.0) + _w.get(_keme, 0.0) + _w.get(_ike, 0.0)
-            if _drain - _help >= 1.5:
+            # 透干有力时阈值提高: 避免全局五行噪声压过官星透干真根.
+            # 无透干仍用 1.5, 保留「星被克泄过重」降级能力.
+            _thr = 2.5 if has_stem else 1.5
+            if _drain - _help >= _thr:
                 strength = "弱"
                 support_notes.append(f"但{star_el}星被克泄过重({_xie}/{_keme}/{_ike}党众),实为弱")
+                support_text = "、".join(support_notes)
 
         return {
             "star": shishen,
@@ -941,45 +972,118 @@ def liuqin_profile(bazi: str, gender: str = "male") -> Optional[Dict]:
             "description": f"{relation}以{shishen}为星：" + "；".join(lines) + f"。整体{support_text}（{strength}）。",
         }
 
-    # 母亲:正印为主,偏印同参(杨炎常以「印星」统称母星;仅正印会漏月支偏印本气)
-    mother_zh = _describe("母亲", mapping["mother"])
-    mother_pian_star = "偏印" if mapping["mother"] == "正印" else "正印"
-    mother_pian = _describe("母亲", mother_pian_star)
-    mother_merged = dict(mother_zh or {})
-    if mother_pian and mother_pian.get("exists"):
-        if not mother_merged.get("exists"):
-            mother_merged = dict(mother_pian)
-            mother_merged["star"] = f"{mapping['mother']}/{mother_pian_star}"
-        else:
-            # 任一印星为强 → 母星强; 合并 locations
-            if mother_pian.get("strength") == "强":
-                mother_merged["strength"] = "强"
-            locs = list(mother_merged.get("locations") or [])
-            seen = {
-                (item.get("position"), item.get("char"), item.get("type"))
-                for item in locs
-            }
-            for loc in mother_pian.get("locations") or []:
-                key = (loc.get("position"), loc.get("char"), loc.get("type"))
-                if key not in seen:
-                    locs.append(loc)
-                    seen.add(key)
-            mother_merged["locations"] = locs
-            if mother_pian.get("strength") == "强" and mother_zh.get("strength") != "强":
-                mother_merged["support_text"] = (
-                    f"{mother_zh.get('support_text', '')};偏印同参:{mother_pian.get('support_text', '')}"
-                ).strip("; ")
-                mother_merged["description"] = (
-                    f"{mother_zh.get('description', '')} "
-                    f"偏印同参亦{mother_pian.get('strength', '')}。"
-                ).strip()
+    def _merge_dual_star(
+        relation: str,
+        primary_star: str,
+        secondary_star: str,
+        *,
+        secondary_label: str = "同参",
+        merge_strength: bool = True,
+    ) -> Dict[str, Any]:
+        """Merge primary + secondary 十神 for one 六亲 (e.g. 正印+偏印).
+
+        When *merge_strength* is True, secondary 强 may lift primary unless
+        primary is clearly floating/destroyed. Locations are always unioned.
+        Father uses merge_strength=False so 正财(妻星) does not inflate 父星.
+        """
+        primary = _describe(relation, primary_star) or {
+            "star": primary_star,
+            "exists": False,
+            "locations": [],
+            "strength": "弱",
+            "support_text": "",
+            "description": "",
+        }
+        secondary = _describe(relation, secondary_star) or {
+            "star": secondary_star,
+            "exists": False,
+            "locations": [],
+            "strength": "弱",
+            "support_text": "",
+            "description": "",
+        }
+        merged = dict(primary)
+        if not secondary.get("exists"):
+            return merged
+        if not merged.get("exists"):
+            # Secondary-only presence: for narrative dual label, but strength
+            # still follows merge_strength policy.
+            merged = dict(secondary)
+            merged["star"] = f"{primary_star}/{secondary_star}"
+            if not merge_strength:
+                # Keep product strength as 弱 when primary star absent
+                # (e.g. 父无偏财仅见正财 → 仍标双星，强弱偏保守)
+                merged["strength"] = "弱"
+                merged["support_text"] = (
+                    f"主星{primary_star}不现，仅{secondary_star}{secondary_label}："
+                    f"{secondary.get('support_text', '')}"
+                ).strip("：")
+            return merged
+
+        zh_sup = primary.get("support_text") or ""
+        zh_weak_note = any(t in zh_sup for t in ("虚浮", "坏根", "无根"))
+        if merge_strength and secondary.get("strength") == "强" and not zh_weak_note:
+            merged["strength"] = "强"
+        locs = list(merged.get("locations") or [])
+        seen = {
+            (item.get("position"), item.get("char"), item.get("type"))
+            for item in locs
+        }
+        for loc in secondary.get("locations") or []:
+            key = (loc.get("position"), loc.get("char"), loc.get("type"))
+            if key not in seen:
+                locs.append(loc)
+                seen.add(key)
+        merged["locations"] = locs
+        merged["star"] = f"{primary_star}/{secondary_star}"
+        if secondary.get("strength") == "强" and primary.get("strength") != "强":
+            merged["support_text"] = (
+                f"{primary.get('support_text', '')};"
+                f"{secondary_star}{secondary_label}:{secondary.get('support_text', '')}"
+            ).strip("; ")
+            merged["description"] = (
+                f"{primary.get('description', '')} "
+                f"{secondary_star}{secondary_label}亦{secondary.get('strength', '')}。"
+            ).strip()
+        if zh_weak_note and primary.get("strength") == "弱":
+            merged["strength"] = "弱"
+        # Explicit: never let secondary alone inflate when merge_strength is off
+        if not merge_strength:
+            merged["strength"] = primary.get("strength") if primary.get("strength") in ("强", "弱") else "弱"
+        return merged
+
+    # Dual-star 合参:
+    #  母:正印为主,偏印同参（印星统称）— strength 可合参（历史口径）
+    #  父:偏财为主,正财同参标签 — strength 不因正财抬高
+    #  配偶:男正财+偏财 / 女正官+七杀 — 标签合参；strength 只认主星
+    #    （副星抬强在 gold 上易假阳，det 以主星为准）
+    mother_merged = _merge_dual_star(
+        "母亲", mapping["mother"], "偏印" if mapping["mother"] == "正印" else "正印",
+        secondary_label="同参",
+        merge_strength=True,
+    )
+    father_merged = _merge_dual_star(
+        "父亲", mapping["father"], "正财" if mapping["father"] == "偏财" else "偏财",
+        secondary_label="同参",
+        merge_strength=False,
+    )
+    spouse_primary = mapping["spouse"]
+    if gender_key == "male":
+        spouse_secondary = "偏财" if spouse_primary == "正财" else "正财"
+    else:
+        spouse_secondary = "七杀" if spouse_primary == "正官" else "正官"
+    spouse_merged = _merge_dual_star(
+        "配偶", spouse_primary, spouse_secondary,
+        secondary_label="同参",
+        merge_strength=False,
+    )
 
     result: Dict[str, Any] = {
         "gender": gender_key,
         "day_master": day_master,
-        "father": _describe("父亲", mapping["father"]),
+        "father": father_merged,
         "mother": mother_merged,
-        "spouse": _describe("配偶", mapping["spouse"]),
+        "spouse": spouse_merged,
         "son": _describe("儿子", mapping["son"]),
         "daughter": _describe("女儿", mapping["daughter"]),
         "brother": _describe("兄弟", mapping["brother"]),

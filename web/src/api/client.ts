@@ -35,6 +35,7 @@ export interface CreateChartRequest {
     timezone: string;
   };
   label?: string;
+  device_id?: string;
   reuse_existing?: boolean;
 }
 
@@ -42,6 +43,18 @@ export function createChart(payload: CreateChartRequest): Promise<ServerChart> {
   return fetchJson<ServerChart>("/charts", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function listCharts(
+  limit = 50,
+  deviceId?: string
+): Promise<ServerChart[]> {
+  return fetchJson<ServerChart[]>("/charts", {
+    params: {
+      limit,
+      device_id: deviceId || undefined,
+    },
   });
 }
 
@@ -87,12 +100,13 @@ export function fetchDemoChartPackage(
 }
 
 
-export function listCharts(limit = 50): Promise<ServerChart[]> {
-  return fetchJson<ServerChart[]>("/charts", { params: { limit } });
-}
-
-export function getChart(chartId: string): Promise<ServerChart> {
-  return fetchJson<ServerChart>(`/charts/${encodeURIComponent(chartId)}`);
+export function getChart(
+  chartId: string,
+  deviceId?: string
+): Promise<ServerChart> {
+  return fetchJson<ServerChart>(`/charts/${encodeURIComponent(chartId)}`, {
+    params: deviceId ? { device_id: deviceId } : undefined,
+  });
 }
 
 export interface ProductPackage {
@@ -126,12 +140,14 @@ export interface PackageExportOptions {
 
 export function exportChartPackage(
   chartId: string,
-  opts?: PackageExportOptions
+  opts?: PackageExportOptions,
+  deviceId?: string
 ): Promise<ProductPackage> {
   return fetchJson<ProductPackage>(
     `/charts/${encodeURIComponent(chartId)}/export/package`,
     {
       method: "POST",
+      params: deviceId ? { device_id: deviceId } : undefined,
       body: JSON.stringify({
         liunian_start_year: opts?.liunian_start_year,
         liunian_years: opts?.liunian_years ?? 10,
@@ -141,10 +157,12 @@ export function exportChartPackage(
 }
 
 export function exportBaziPackage(
-  payload: CreateChartRequest & PackageExportOptions
+  payload: CreateChartRequest & PackageExportOptions,
+  deviceId?: string
 ): Promise<ProductPackage> {
   return fetchJson<ProductPackage>("/bazi/export/package", {
     method: "POST",
+    params: deviceId ? { device_id: deviceId } : undefined,
     body: JSON.stringify(payload),
   });
 }
@@ -252,7 +270,124 @@ export interface BaziResult {
   liuqin_strength?: Record<string, string>; // father/mother/spouse/son/daughter/brother/sister → "强"|"弱"
   liuqin_analysis?: string;
   dayun_summary?: string;
+  /** 应期展示决策 hard_shortlist | soft_hint | trend_only | unavailable */
+  year_timing_surface?: YearTimingSurface;
+  /** 六亲细断 det：性格/能力/健康/关系/大运应期 */
+  liuqin_dossier?: LiuqinDossier;
   error?: string;
+}
+
+export interface LiuqinTimingHighlight {
+  pillar?: string;
+  ages?: string;
+  note?: string;
+  stem_shishen?: string;
+}
+
+export interface LiuqinLiunianSample {
+  year?: number;
+  pillar?: string;
+  age?: number;
+  stem_shishen?: string;
+  note?: string;
+  kind?: string;
+}
+
+export interface LiuqinPalaceNote {
+  palace_label?: string;
+  palace_branch?: string;
+  palace_main_qi?: string;
+  palace_note?: string;
+}
+
+export interface LiuqinMemberDossier {
+  key?: string;
+  label?: string;
+  star?: string;
+  /** Dual-star list e.g. ["正印","偏印"] */
+  stars?: string[];
+  exists?: boolean;
+  strength?: string;
+  support_text?: string;
+  locations_text?: string;
+  dual_star_note?: string;
+  palace?: LiuqinPalaceNote;
+  character?: string;
+  ability?: string;
+  health?: string;
+  appearance?: string;
+  relation?: string;
+  timing?: {
+    dayun_highlights?: LiuqinTimingHighlight[];
+    favorable_hint?: string;
+    caution_hint?: string;
+    /** Symbolic year samples only — never assert single year */
+    liunian_samples?: LiuqinLiunianSample[];
+  };
+  narrative?: string;
+  honesty?: string;
+}
+
+export interface LiuqinDossier {
+  gender?: string;
+  day_master?: string;
+  members?: Partial<Record<
+    "father" | "mother" | "spouse" | "son" | "daughter" | "brother" | "sister",
+    LiuqinMemberDossier
+  >>;
+  children_bias?: string;
+  spouse_palace?: Record<string, unknown>;
+  parents_palace?: Record<string, unknown>;
+  children_palace?: Record<string, unknown>;
+  disclaimer?: string;
+}
+
+export interface YearTimingCandidate {
+  year: number;
+  gan_zhi: string;
+  score: number;
+  confidence: string;
+  reasons: string[];
+  option_letter?: string;
+  option_text?: string;
+  /** True when year also appears in liuqin symbolic samples */
+  liuqin_overlap?: boolean;
+}
+
+export interface LiuqinYearBridgeSample {
+  member_key?: string;
+  member_label?: string;
+  year?: number;
+  pillar?: string;
+  age?: number;
+  note?: string;
+  kind?: string;
+}
+
+export interface LiuqinYearBridge {
+  member_keys?: string[];
+  samples?: LiuqinYearBridgeSample[];
+  overlap_years?: number[];
+  honesty?: string;
+}
+
+export interface YearTimingSurface {
+  event_kind?: string | null;
+  display_mode:
+    | "hard_shortlist"
+    | "soft_hint"
+    | "trend_only"
+    | "unavailable"
+    | string;
+  trust: string;
+  assert_single_year: boolean;
+  candidates: YearTimingCandidate[];
+  product_title?: string;
+  product_copy?: string;
+  disclaimer?: string;
+  meta?: Record<string, unknown> & {
+    liuqin_bridge?: LiuqinYearBridge;
+  };
 }
 
 export interface BaziAnalyzeResponse {
@@ -260,14 +395,57 @@ export interface BaziAnalyzeResponse {
   result: BaziResult;
 }
 
+export interface AnalyzeBaziOptions {
+  gender?: string;
+  birthDate?: string;
+  birthTime?: string;
+  calendarType?: "solar" | "lunar";
+  topK?: number;
+}
+
 export function analyzeBazi(
   bazi: string,
   question: string,
-  topK?: number
+  options?: AnalyzeBaziOptions | number
 ): Promise<BaziAnalyzeResponse> {
+  // Backward compatible: third arg may still be topK number.
+  const opts: AnalyzeBaziOptions =
+    typeof options === "number" ? { topK: options } : options || {};
   return fetchJson<BaziAnalyzeResponse>("/bazi/analyze", {
     method: "POST",
-    body: JSON.stringify({ bazi, question, top_k: topK }),
+    body: JSON.stringify({
+      bazi,
+      question,
+      top_k: opts.topK,
+      gender: opts.gender || "male",
+      birth_date: opts.birthDate || "",
+      birth_time: opts.birthTime || "00:00",
+      calendar_type: opts.calendarType || "solar",
+    }),
+  });
+}
+
+/** Zero-LLM year shortlist / trend surface (product honesty layer). */
+export function fetchYearTiming(
+  bazi: string,
+  question: string,
+  options: {
+    optionTexts?: string[];
+    gender?: string;
+    birthDate?: string;
+    birthTime?: string;
+  } = {}
+): Promise<{ bazi: string; year_timing_surface: YearTimingSurface }> {
+  return fetchJson("/bazi/year-timing", {
+    method: "POST",
+    body: JSON.stringify({
+      bazi,
+      question,
+      options: options.optionTexts || [],
+      gender: options.gender || "male",
+      birth_date: options.birthDate || "",
+      birth_time: options.birthTime || "00:00",
+    }),
   });
 }
 
@@ -706,17 +884,37 @@ export interface BaziFromDatetimeResponse {
   bazi: string;
   pillars: Record<string, string>;
   calendar_type: string;
+  is_leap_month?: boolean;
+  true_solar_adjusted?: boolean;
+  effective_datetime?: string;
+}
+
+export interface BaziFromDatetimeOptions {
+  calendarType?: "solar" | "lunar";
+  /** 农历闰月（仅 lunar 有效） */
+  isLeapMonth?: boolean;
+  /** 出生地经度；公历时用于真太阳时修正（东经为正） */
+  longitude?: number;
 }
 
 export function baziFromDatetime(
   birthDatetime: string,
-  calendarType: "solar" | "lunar" = "solar"
+  calendarTypeOrOptions: "solar" | "lunar" | BaziFromDatetimeOptions = "solar"
 ): Promise<BaziFromDatetimeResponse> {
+  const opts: BaziFromDatetimeOptions =
+    typeof calendarTypeOrOptions === "string"
+      ? { calendarType: calendarTypeOrOptions }
+      : calendarTypeOrOptions || {};
   return fetchJson<BaziFromDatetimeResponse>("/bazi/from_datetime", {
     method: "POST",
     body: JSON.stringify({
       birth_datetime: birthDatetime,
-      calendar_type: calendarType,
+      calendar_type: opts.calendarType || "solar",
+      is_leap_month: Boolean(opts.isLeapMonth),
+      longitude:
+        typeof opts.longitude === "number" && Number.isFinite(opts.longitude)
+          ? opts.longitude
+          : undefined,
     }),
   });
 }
@@ -780,6 +978,8 @@ export interface DestinyAnalyzeRequest {
   gender?: string;
   birth_datetime?: string;
   location?: LocationPayload;
+  /** Server chart UUID — used for calibration weight lookup. */
+  chart_id?: string;
   use_calibration_weights?: boolean;
   system_weights?: Record<string, number>;
 }
@@ -939,24 +1139,38 @@ export interface CreateEventRequest {
   description: string;
 }
 
-export function listEvents(chartId: string): Promise<LifeEvent[]> {
-  return fetchJson<LifeEvent[]>(`/charts/${encodeURIComponent(chartId)}/events`);
+export function listEvents(
+  chartId: string,
+  deviceId?: string
+): Promise<LifeEvent[]> {
+  return fetchJson<LifeEvent[]>(`/charts/${encodeURIComponent(chartId)}/events`, {
+    params: deviceId ? { device_id: deviceId } : undefined,
+  });
 }
 
 export function createEvent(
   chartId: string,
-  payload: CreateEventRequest
+  payload: CreateEventRequest,
+  deviceId?: string
 ): Promise<LifeEvent> {
   return fetchJson<LifeEvent>(`/charts/${encodeURIComponent(chartId)}/events`, {
     method: "POST",
+    params: deviceId ? { device_id: deviceId } : undefined,
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteEvent(chartId: string, eventId: string): Promise<{ deleted: boolean }> {
+export function deleteEvent(
+  chartId: string,
+  eventId: string,
+  deviceId?: string
+): Promise<{ deleted: boolean }> {
   return fetchJson<{ deleted: boolean }>(
     `/charts/${encodeURIComponent(chartId)}/events/${encodeURIComponent(eventId)}`,
-    { method: "DELETE" }
+    {
+      method: "DELETE",
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }
   );
 }
 
@@ -981,18 +1195,26 @@ export interface CalibrationResponse {
   created_at?: number;
 }
 
-export function calibrateChart(chartId: string): Promise<CalibrationResponse> {
+export function calibrateChart(
+  chartId: string,
+  deviceId?: string
+): Promise<CalibrationResponse> {
   return fetchJson<CalibrationResponse>(
     `/charts/${encodeURIComponent(chartId)}/calibrate`,
-    { method: "POST" }
+    {
+      method: "POST",
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }
   );
 }
 
 export function fetchLatestCalibration(
-  chartId: string
+  chartId: string,
+  deviceId?: string
 ): Promise<CalibrationResponse> {
   return fetchJson<CalibrationResponse>(
-    `/charts/${encodeURIComponent(chartId)}/calibrate/latest`
+    `/charts/${encodeURIComponent(chartId)}/calibrate/latest`,
+    { params: deviceId ? { device_id: deviceId } : undefined }
   );
 }
 

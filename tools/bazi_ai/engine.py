@@ -470,7 +470,11 @@ def _build_user_prompt(
                 + "\n".join(star_lines)
             )
 
-    gender_label = "男命" if gender in ("male", "男") else "女命"
+    gender_label = (
+        "女命"
+        if (gender or "").strip() in ("female", "女", "f", "F")
+        else "男命"
+    )
 
     return f"""请为以下八字做详细分析，像一位真人命理师面对面跟命主交谈那样回答。
 
@@ -660,13 +664,55 @@ async def analyze_bazi(
         flow_facts=flow_facts,
         shensha_facts=shensha_facts,
     )
+    # Ground LLM 六亲 with det 细断 (性格/健康/应期提要)；强弱不得改判。
+    try:
+        from tools.bazi_ai.liuqin_dossier import (
+            build_liuqin_dossier,
+            format_liuqin_dossier_prompt,
+        )
 
-    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+        _dq = build_liuqin_dossier(
+            bazi,
+            gender=gender,
+            birth_date=birth_date or "",
+            birth_time=birth_time or "00:00",
+        )
+        if _dq:
+            user_prompt = user_prompt + "\n\n" + format_liuqin_dossier_prompt(_dq)
+    except Exception:
+        pass
+
+    key = (
+        api_key
+        or os.environ.get("MINIMAX_API_KEY")
+        or os.environ.get("DOUYIN_BAZI_AI_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
+    )
     if not key:
-        return _mock_analyze(bazi, question, similar_cases)
+        mock = _mock_analyze(bazi, question, similar_cases)
+        return _attach_year_timing(
+            mock,
+            bazi,
+            question=question,
+            gender=gender,
+            birth_date=birth_date,
+            birth_time=birth_time,
+        )
 
-    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").rstrip("/")
-    mdl = model or os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat"
+    base = (
+        base_url
+        or os.environ.get("MINIMAX_BASE_URL")
+        or os.environ.get("DOUYIN_BAZI_AI_BASE_URL")
+        or os.environ.get("DEEPSEEK_BASE_URL")
+        or "https://api.deepseek.com/v1"
+    ).rstrip("/")
+    mdl = (
+        model
+        or os.environ.get("MINIMAX_MODEL")
+        or os.environ.get("DOUYIN_BAZI_AI_MODEL")
+        or os.environ.get("DEEPSEEK_MODEL")
+        or "deepseek-chat"
+    )
 
     if aiohttp is None:  # pragma: no cover
         raise ImportError("需要 aiohttp 来调用 DeepSeek API")
@@ -685,7 +731,9 @@ async def analyze_bazi(
     }
     if not is_reasoner:
         payload["temperature"] = 0.2
-        payload["response_format"] = {"type": "json_object"}
+        # MiniMax / some OpenAI-compatible gateways reject response_format.
+        if "minimax" not in base.lower() and "abab" not in mdl.lower():
+            payload["response_format"] = {"type": "json_object"}
 
     last_error: Optional[Exception] = None
     for attempt in range(1, 4):
@@ -705,7 +753,16 @@ async def analyze_bazi(
                     data = await resp.json()
                     content = data["choices"][0]["message"]["content"]
                     parsed = _parse_json(content, bazi, similar_cases)
-                    return _validate_output(parsed, bazi)
+                    return _validate_output(
+                        parsed,
+                        bazi,
+                        liuqin_facts=liuqin_facts,
+                        structural_facts=structural_facts,
+                        gender=gender,
+                        question=question,
+                        birth_date=birth_date,
+                        birth_time=birth_time,
+                    )
         except (ClientResponseError, asyncio.TimeoutError, Exception) as exc:
             last_error = exc
             logger.warning("AI 分析请求失败 (attempt %d/3): %s", attempt, exc)
@@ -718,7 +775,14 @@ async def analyze_bazi(
         0,
         f"AI 服务暂时不可用（{last_error}），已切换为规则兜底分析，结果仅供参考。",
     )
-    return fallback
+    return _attach_year_timing(
+        fallback,
+        bazi,
+        question=question,
+        gender=gender,
+        birth_date=birth_date,
+        birth_time=birth_time,
+    )
 
 
 def _bazi_profile(bazi: str) -> Dict[str, str]:
@@ -2954,9 +3018,168 @@ def _sanitize_liuqin_object(liuqin: Dict) -> Dict:
     return cleaned
 
 
-def _validate_output(result: Dict, bazi: str) -> Dict:
+def _force_det_fields(
+    result: Dict,
+    bazi: str,
+    *,
+    liuqin_facts: Optional[Dict] = None,
+    structural_facts: Optional[Dict] = None,
+    gender: str = "male",
+    birth_date: str = "",
+    birth_time: str = "00:00",
+) -> Dict:
+    """Overwrite symbolic fields with deterministic engine values.
+
+    Prompt instructions alone are insufficient: models still rewrite 用神 / 六亲强弱.
+    Post-process is the hard guarantee that det accuracy reaches the product surface.
+    """
+    caveats = list(result.get("caveats") or [])
+    if structural_facts is None:
+        structural_facts = structural_profile(bazi) or {}
+    if liuqin_facts is None:
+        liuqin_facts = liuqin_profile(bazi, gender=gender) or {}
+
+    basic = result.get("basic_info")
+    if not isinstance(basic, dict):
+        basic = {}
+        result["basic_info"] = basic
+
+    def _as_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(x).strip() for x in value if str(x).strip()]
+        text = str(value).replace("、", ",").replace("，", ",")
+        return [p.strip() for p in text.split(",") if p.strip()]
+
+    det_useful = _as_list(structural_facts.get("useful_gods"))
+    det_taboo = _as_list(structural_facts.get("taboo_gods"))
+    if det_useful:
+        prev = basic.get("useful_gods")
+        basic["useful_gods"] = det_useful
+        if prev is not None and _as_list(prev) != det_useful:
+            caveats.append("用神已按程序扶抑/调候结果强制覆盖")
+    if det_taboo:
+        prev = basic.get("taboo_gods")
+        basic["taboo_gods"] = det_taboo
+        if prev is not None and _as_list(prev) != det_taboo:
+            caveats.append("忌神已按程序结果强制覆盖")
+
+    # Strength from structural profile when available
+    det_strength = structural_facts.get("strength") or structural_facts.get("day_master_strength")
+    if det_strength:
+        basic["day_master_strength"] = det_strength
+
+    lq_keys = ("father", "mother", "spouse", "son", "daughter", "brother", "sister")
+    forced_lq: Dict[str, str] = {}
+    for key in lq_keys:
+        info = liuqin_facts.get(key) if isinstance(liuqin_facts, dict) else None
+        if not isinstance(info, dict):
+            forced_lq[key] = "弱"
+            continue
+        strength = info.get("strength")
+        if strength in ("强", "弱"):
+            forced_lq[key] = strength
+        else:
+            # 不现 / 缘薄 → 产品层按弱处理（避免空值被模型回填）
+            forced_lq[key] = "弱"
+
+    prev_lq = result.get("liuqin_strength")
+    result["liuqin_strength"] = forced_lq
+    result["_det_enforced"] = {
+        "liuqin_strength": True,
+        "useful_gods": bool(det_useful),
+        "taboo_gods": bool(det_taboo),
+    }
+    if prev_lq != forced_lq:
+        caveats.append("六亲强弱已按程序 det 层强制覆盖（禁止模型改判）")
+
+    # Detailed det 六亲细断 (性格/健康/关系/大运应期提要)
+    dossier = None
+    try:
+        from tools.bazi_ai.liuqin_dossier import (
+            build_liuqin_dossier,
+            format_liuqin_dossier_markdown,
+        )
+
+        dossier = build_liuqin_dossier(
+            bazi,
+            gender=gender,
+            birth_date=birth_date or "",
+            birth_time=birth_time or "00:00",
+        )
+    except Exception:
+        dossier = None
+    if dossier:
+        result["liuqin_dossier"] = dossier
+        result["_det_enforced"]["liuqin_dossier"] = True
+
+    # Soft-align free-text liuqin_analysis: inject a machine-readable prefix block.
+    prefix_lines = ["【程序六亲强弱·强制】"]
+    label = {
+        "father": "父亲",
+        "mother": "母亲",
+        "spouse": "配偶",
+        "son": "儿子",
+        "daughter": "女儿",
+        "brother": "兄弟",
+        "sister": "姐妹",
+    }
+    for key in lq_keys:
+        prefix_lines.append(f"{label[key]}：{forced_lq[key]}")
+    if dossier and dossier.get("children_bias"):
+        prefix_lines.append(f"子女偏向：{dossier['children_bias']}")
+    prefix = "\n".join(prefix_lines) + "\n\n"
+    analysis = result.get("liuqin_analysis")
+    if isinstance(analysis, str) and analysis.strip():
+        if not analysis.startswith("【程序六亲强弱"):
+            result["liuqin_analysis"] = prefix + analysis
+    elif not analysis:
+        # Prefer full det narratives when model omitted the field.
+        if dossier:
+            bits = [
+                (dossier.get("members") or {}).get(k, {}).get("narrative")
+                or f"{label[k]}：{forced_lq[k]}"
+                for k, _ in (
+                    ("father", None),
+                    ("mother", None),
+                    ("spouse", None),
+                    ("son", None),
+                    ("daughter", None),
+                    ("brother", None),
+                    ("sister", None),
+                )
+            ]
+            result["liuqin_analysis"] = prefix + "\n\n".join(b for b in bits if b)
+        else:
+            bits = []
+            for key in lq_keys:
+                info = (liuqin_facts or {}).get(key) or {}
+                desc = info.get("description") or f"{label[key]}星{forced_lq[key]}"
+                bits.append(desc)
+            result["liuqin_analysis"] = prefix + "\n".join(bits)
+
+    if caveats:
+        result["caveats"] = caveats
+    return result
+
+
+def _validate_output(
+    result: Dict,
+    bazi: str,
+    *,
+    liuqin_facts: Optional[Dict] = None,
+    structural_facts: Optional[Dict] = None,
+    gender: str = "male",
+    question: str = "",
+    birth_date: str = "",
+    birth_time: str = "00:00",
+) -> Dict:
     """Sanity-check model output and add caveats for obvious mismatches."""
     basic = result.get("basic_info", {})
+    if not isinstance(basic, dict):
+        basic = {}
+        result["basic_info"] = basic
     caveats = list(result.get("caveats", []))
 
     # Strip accidental per-field confidence annotations and forbidden filler phrases.
@@ -3068,6 +3291,111 @@ def _validate_output(result: Dict, bazi: str) -> Dict:
         result["caveats"] = caveats
 
     result, _ = check_analysis(result)
+    # Hard guarantee: det fields always win over model freestyle.
+    result = _force_det_fields(
+        result,
+        bazi,
+        liuqin_facts=liuqin_facts,
+        structural_facts=structural_facts,
+        gender=gender,
+        birth_date=birth_date or "",
+        birth_time=birth_time or "00:00",
+    )
+    # Product honesty layer: year/应期 display mode (never asserts a single year).
+    try:
+        from tools.bazi_ai.year_timing_surface import resolve_year_timing
+
+        # Free-form analyze has no MCQ options → open-ended path (trend_only or
+        # unavailable). Dedicated /bazi/year-timing accepts option lists.
+        yts = resolve_year_timing(
+            bazi,
+            question or "综合运势",
+            options=None,
+            gender=gender,
+            birth_date=birth_date or "",
+            birth_time=birth_time or "00:00",
+        )
+        result["year_timing_surface"] = yts.to_dict()
+    except Exception:
+        pass
+    _link_year_timing_liuqin(
+        result,
+        question=question or "",
+        bazi=bazi,
+        gender=gender,
+        birth_date=birth_date or "",
+        birth_time=birth_time or "00:00",
+    )
+    return result
+
+
+def _link_year_timing_liuqin(
+    result: Dict,
+    *,
+    question: str = "",
+    bazi: str = "",
+    gender: str = "male",
+    birth_date: str = "",
+    birth_time: str = "00:00",
+) -> None:
+    """Ensure dossier exists then bridge year_timing ↔ liuqin liunian samples."""
+    if not result.get("liuqin_dossier") and bazi:
+        try:
+            from tools.bazi_ai.liuqin_dossier import build_liuqin_dossier
+
+            result["liuqin_dossier"] = build_liuqin_dossier(
+                bazi,
+                gender=gender,
+                birth_date=birth_date or "",
+                birth_time=birth_time or "00:00",
+            )
+        except Exception:
+            pass
+    yts = result.get("year_timing_surface")
+    dossier = result.get("liuqin_dossier")
+    if isinstance(yts, dict) and isinstance(dossier, dict):
+        try:
+            from tools.bazi_ai.year_timing_surface import enrich_year_timing_with_liuqin
+
+            result["year_timing_surface"] = enrich_year_timing_with_liuqin(
+                yts, dossier, question=question or ""
+            )
+        except Exception:
+            pass
+
+
+def _attach_year_timing(
+    result: Dict,
+    bazi: str,
+    *,
+    question: str = "",
+    gender: str = "male",
+    birth_date: str = "",
+    birth_time: str = "00:00",
+) -> Dict:
+    """Attach year_timing_surface for mock / fallback paths (no LLM)."""
+    try:
+        from tools.bazi_ai.year_timing_surface import resolve_year_timing
+
+        yts = resolve_year_timing(
+            bazi,
+            question or "综合运势",
+            options=None,
+            gender=gender,
+            birth_date=birth_date or "",
+            birth_time=birth_time or "00:00",
+        )
+        result["year_timing_surface"] = yts.to_dict()
+    except Exception:
+        pass
+    _link_year_timing_liuqin(
+        result,
+        question=question,
+        bazi=bazi,
+        gender=gender,
+        birth_date=birth_date,
+        birth_time=birth_time,
+    )
     return result
 
 

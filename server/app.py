@@ -98,6 +98,22 @@ class BaziAnalyzeResponse(BaseModel):
     result: Dict[str, Any]
 
 
+class BaziYearTimingRequest(BaseModel):
+    """Symbolic year shortlist / trend surface (zero LLM)."""
+
+    bazi: str
+    question: str
+    options: List[str] = []
+    gender: str = "male"
+    birth_date: str = ""
+    birth_time: str = "00:00"
+
+
+class BaziYearTimingResponse(BaseModel):
+    bazi: str
+    year_timing_surface: Dict[str, Any]
+
+
 class BaziTimelineRequest(BaseModel):
     bazi: str
     gender: str = ""
@@ -133,12 +149,19 @@ class BaziYearlyResponse(BaseModel):
 class BaziFromDatetimeRequest(BaseModel):
     birth_datetime: str
     calendar_type: str = "solar"
+    # 农历闰月：仅 calendar_type=lunar 时生效
+    is_leap_month: bool = False
+    # 可选出生地经度（东经为正）；提供时按东八区 120°E 做真太阳时修正
+    longitude: Optional[float] = None
 
 
 class BaziFromDatetimeResponse(BaseModel):
     bazi: str
     pillars: Dict[str, str]
     calendar_type: str
+    is_leap_month: bool = False
+    true_solar_adjusted: bool = False
+    effective_datetime: Optional[str] = None
 
 
 class BaziReportRequest(BaseModel):
@@ -314,6 +337,8 @@ class DestinyAnalyzeRequest(BaseModel):
     gender: Optional[str] = None
     birth_datetime: Optional[str] = None
     location: Optional[Dict[str, Any]] = None
+    # Chart UUID for calibration weight lookup (preferred over bazi string).
+    chart_id: Optional[str] = None
     # If true (default), load latest calibration adjusted_weights for this chart.
     use_calibration_weights: bool = True
     # Explicit override; wins over stored calibration when provided.
@@ -340,6 +365,7 @@ class DestinyCouncilRequest(BaseModel):
     gender: Optional[str] = None
     birth_datetime: Optional[str] = None
     location: Optional[Dict[str, Any]] = None
+    chart_id: Optional[str] = None
     use_calibration_weights: bool = True
     system_weights: Optional[Dict[str, float]] = None
 
@@ -411,7 +437,9 @@ class ChartCreateRequest(BaseModel):
     calendar_type: str = "solar"
     location: Optional[Dict[str, Any]] = None
     label: str = ""
-    # If true, reuse most recent chart with same bazi when present.
+    # Browser anonymous device id for isolation (required in production).
+    device_id: str = ""
+    # If true, reuse most recent chart with same bazi+device when present.
     reuse_existing: bool = True
 
 
@@ -436,6 +464,7 @@ class ChartResponse(BaseModel):
     calendar_type: str = "solar"
     location: Optional[Dict[str, Any]] = None
     label: str = ""
+    device_id: str = ""
     created_at: int = 0
     updated_at: int = 0
 
@@ -544,7 +573,25 @@ class _ServerDeps:
         self.rate_limiter = RateLimiter(max_per_second=float(config.get("rate_limit", 2) or 2))
         self.retry_handler = RetryHandler(max_retries=int(config.get("retry_times", 3) or 3))
         self.queue_manager = QueueManager(max_workers=int(config.get("thread", 5) or 5))
+        # Process-level Database for history / increase / dedup (align with CLI).
+        self.database = None
+        try:
+            from storage import Database
+
+            # `database` is a bool feature flag; path lives in database_path.
+            if config.get("database", True) is False:
+                self.database = None
+            else:
+                db_path = (
+                    config.get("database_path")
+                    or config.get("db_path")
+                    or "dy_downloader.db"
+                )
+                self.database = Database(str(db_path))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Server Database init failed: %s", exc)
         self._overrides: Dict[str, Any] = {}
+        self._db_ready = False
 
     def apply_overrides(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
         """Apply runtime config overrides and return the effective values.
@@ -588,7 +635,8 @@ async def _execute_download(url: str, deps: "_ServerDeps") -> Dict[str, int]:
     API client 仍按请求创建（aiohttp session 不跨请求复用）；其余重量级依赖从
     _ServerDeps 共享。
     """
-    async with DouyinAPIClient(deps.cookie_manager.get_cookies()) as api_client:
+    proxy = deps.config.get("proxy")
+    async with DouyinAPIClient(deps.cookie_manager.get_cookies(), proxy=proxy) as api_client:
         if is_short_url(url):
             resolved = await api_client.resolve_short_url(normalize_short_url(url))
             if not resolved:
@@ -605,7 +653,7 @@ async def _execute_download(url: str, deps: "_ServerDeps") -> Dict[str, int]:
             api_client,
             deps.file_manager,
             deps.cookie_manager,
-            None,  # database 不在 server 场景里启用，避免单例冲突
+            deps.database,
             deps.rate_limiter,
             deps.retry_handler,
             deps.queue_manager,
@@ -643,8 +691,22 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if deps.database is not None:
+            try:
+                await deps.database.initialize()
+                deps._db_ready = True
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Database initialize failed: %s", exc)
+                deps.database = None
         yield
         await manager.shutdown()
+        if deps.database is not None:
+            try:
+                close = getattr(deps.database, "close", None)
+                if callable(close):
+                    await close()
+            except Exception:  # pragma: no cover
+                pass
 
     app = FastAPI(
         title="Douyin Downloader API",
@@ -764,6 +826,43 @@ def build_app(config: ConfigLoader) -> FastAPI:
             model=ai_cfg.get("model") or None,
         )
         return BaziAnalyzeResponse(bazi=req.bazi, result=result)
+
+    @app.post("/api/v1/bazi/year-timing", response_model=BaziYearTimingResponse)
+    async def bazi_year_timing(req: BaziYearTimingRequest) -> BaziYearTimingResponse:
+        """结构应期 shortlist / 趋势口径（零 LLM，不断言单年）。"""
+        from tools.bazi_ai.liuqin_dossier import build_liuqin_dossier
+        from tools.bazi_ai.year_timing_surface import (
+            enrich_year_timing_with_liuqin,
+            resolve_year_timing,
+        )
+
+        bazi = req.bazi.strip()
+        question = req.question.strip() or "综合运势"
+        surf = resolve_year_timing(
+            bazi,
+            question,
+            options=list(req.options or []),
+            gender=req.gender or "male",
+            birth_date=req.birth_date or "",
+            birth_time=req.birth_time or "00:00",
+        )
+        surface = surf.to_dict()
+        try:
+            dossier = build_liuqin_dossier(
+                bazi,
+                gender=req.gender or "male",
+                birth_date=req.birth_date or "",
+                birth_time=req.birth_time or "00:00",
+            )
+            surface = enrich_year_timing_with_liuqin(
+                surface, dossier, question=question
+            )
+        except Exception:
+            pass
+        return BaziYearTimingResponse(
+            bazi=bazi,
+            year_timing_surface=surface,
+        )
 
     @app.post("/api/v1/bazi/report", response_model=BaziReportResponse)
     async def bazi_report(req: BaziReportRequest) -> BaziReportResponse:
@@ -888,6 +987,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def bazi_from_datetime(req: BaziFromDatetimeRequest) -> BaziFromDatetimeResponse:
         """Derive bazi from a solar or lunar birth datetime."""
         from datetime import datetime as _dt
+        from datetime import timedelta as _td
 
         from tools.bazi_ai.calendar import (
             pillars_for_datetime,
@@ -900,25 +1000,54 @@ def build_app(config: ConfigLoader) -> FastAPI:
         try:
             dt = _dt.fromisoformat(raw)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid datetime: {exc}")
+            raise HTTPException(status_code=400, detail=f"Invalid datetime: {exc}") from exc
+        # Prefer wall-clock components for charting.
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
 
         calendar_type = req.calendar_type.strip().lower()
         if calendar_type not in ("solar", "lunar"):
             raise HTTPException(status_code=400, detail="calendar_type must be solar or lunar")
 
+        true_solar_adjusted = False
+        effective = dt
+        # True solar time: offset minutes ≈ 4 * (longitude - standard meridian).
+        # China civil time uses 120°E as the standard meridian.
+        if req.longitude is not None and calendar_type == "solar":
+            try:
+                lon = float(req.longitude)
+                if -180.0 <= lon <= 180.0:
+                    offset_min = 4.0 * (lon - 120.0)
+                    effective = dt + _td(minutes=offset_min)
+                    true_solar_adjusted = abs(offset_min) >= 0.5
+            except (TypeError, ValueError):
+                true_solar_adjusted = False
+
         try:
             if calendar_type == "lunar":
                 pillars = pillars_for_lunar_datetime(
-                    dt.year, dt.month, dt.day, dt.hour, dt.minute
+                    dt.year,
+                    dt.month,
+                    dt.day,
+                    dt.hour,
+                    dt.minute,
+                    leap=bool(req.is_leap_month),
                 )
             else:
-                pillars = pillars_for_datetime(dt)
+                pillars = pillars_for_datetime(effective)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Bazi calculation failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail=f"Bazi calculation failed: {exc}"
+            ) from exc
 
         bazi = " ".join([pillars["year"], pillars["month"], pillars["day"], pillars["hour"]])
         return BaziFromDatetimeResponse(
-            bazi=bazi, pillars=pillars, calendar_type=calendar_type
+            bazi=bazi,
+            pillars=pillars,
+            calendar_type=calendar_type,
+            is_leap_month=bool(req.is_leap_month) if calendar_type == "lunar" else False,
+            true_solar_adjusted=true_solar_adjusted,
+            effective_datetime=effective.isoformat(timespec="minutes"),
         )
 
     @app.post("/api/v1/qizheng/analyze", response_model=QizhengAnalyzeResponse)
@@ -1101,7 +1230,15 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
         from tools.bazi_cli import extract_bazi_for_directory
 
-        user_dir = Path(req.user_dir)
+        user_dir = Path(req.user_dir).expanduser().resolve()
+        download_root = Path(config.get("path", "./Downloaded")).expanduser().resolve()
+        try:
+            user_dir.relative_to(download_root)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"user_dir must be under download path: {download_root}",
+            ) from exc
         if not user_dir.exists():
             raise HTTPException(status_code=404, detail=f"user_dir not found: {req.user_dir}")
 
@@ -1144,6 +1281,24 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
     # ── 多学派命理端点 ──
 
+    def _split_birth_datetime(birth_datetime: Optional[str]) -> Tuple[str, str]:
+        """Split ISO birth datetime into (date, time) wall-clock strings."""
+        if not birth_datetime:
+            return "", ""
+        raw = str(birth_datetime).strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1]
+        # Drop timezone suffix if present so we keep wall-clock intent.
+        if "+" in raw[10:]:
+            raw = raw.split("+", 1)[0]
+        if "T" in raw:
+            date_part, time_part = raw.split("T", 1)
+            return date_part[:10], (time_part[:5] if time_part else "00:00")
+        if " " in raw:
+            date_part, time_part = raw.split(" ", 1)
+            return date_part[:10], (time_part[:5] if time_part else "00:00")
+        return raw[:10], ""
+
     def _build_bazi_caller() -> Optional[Any]:
         """Build a bazi caller that respects the configured bazi_ai paths."""
         try:
@@ -1164,11 +1319,16 @@ def build_app(config: ConfigLoader) -> FastAPI:
             return [Path(v) for v in values if v]
 
         async def _caller(chart_info: Any, question: str) -> Dict[str, Any]:
+            birth_date, birth_time = _split_birth_datetime(
+                getattr(chart_info, "birth_datetime", None)
+            )
+            gender = (getattr(chart_info, "gender", None) or "male") or "male"
             return await analyze_bazi(
                 chart_info.bazi,
                 question=question,
-                gender=chart_info.gender or "male",
-                birth_date=getattr(chart_info, "birth_datetime", "") or "",
+                gender=gender,
+                birth_date=birth_date,
+                birth_time=birth_time or "00:00",
                 cases_path=cases_path,
                 knowledge_base_path=knowledge_path,
                 extra_cases_paths=_to_paths("extra_cases_paths"),
@@ -1197,7 +1357,49 @@ def build_app(config: ConfigLoader) -> FastAPI:
         )
 
         async def _caller(chart_info: Any, question: str) -> Dict[str, Any]:
-            return await analyzer.analyze({"bazi": chart_info.bazi}, question=question)
+            payload: Dict[str, Any] = {
+                "bazi": chart_info.bazi,
+                "chart": chart_info.bazi,
+            }
+            bdt = getattr(chart_info, "birth_datetime", None)
+            loc = getattr(chart_info, "location", None) or {}
+            if bdt:
+                payload["birth_datetime"] = bdt
+            if isinstance(loc, dict):
+                if loc.get("latitude") is not None:
+                    payload["latitude"] = loc.get("latitude")
+                if loc.get("longitude") is not None:
+                    payload["longitude"] = loc.get("longitude")
+                if loc.get("timezone_offset") is not None:
+                    payload["timezone_offset"] = loc.get("timezone_offset")
+            return await analyzer.analyze(payload, question=question)
+
+        return _caller
+
+    def _build_ziwei_caller() -> Optional[Any]:
+        """Build a Zi Wei Dou Shu caller."""
+        try:
+            from tools.ziwei.engine import ZiWeiAnalyzer
+        except Exception:  # pragma: no cover - optional subsystem
+            return None
+
+        package_dir = Path(__file__).resolve().parent.parent / "tools" / "ziwei"
+        analyzer = ZiWeiAnalyzer(
+            rule_primer_path=package_dir / "rule_primer.md",
+            cases_path=package_dir / "cases.jsonl",
+        )
+
+        async def _caller(chart_info: Any, question: str) -> Dict[str, Any]:
+            if hasattr(chart_info, "ziwei_chart_info"):
+                payload = chart_info.ziwei_chart_info()
+            else:
+                payload = {
+                    "bazi": getattr(chart_info, "bazi", ""),
+                    "gender": getattr(chart_info, "gender", None) or "male",
+                    "birth_datetime": getattr(chart_info, "birth_datetime", None) or "",
+                    "location": getattr(chart_info, "location", None),
+                }
+            return await analyzer.analyze(payload, question=question)
 
         return _caller
 
@@ -1212,10 +1414,25 @@ def build_app(config: ConfigLoader) -> FastAPI:
         latest_fn = getattr(store, "latest_calibration", None) if store else None
         if not callable(latest_fn):
             return {}
-        try:
-            latest = latest_fn(chart_bazi.strip())
-        except Exception:  # pragma: no cover
-            return {}
+        # Prefer chart UUID (same key used by calibrate_chart); fall back to bazi.
+        lookup_keys: List[str] = []
+        chart_id = (getattr(req, "chart_id", None) or "").strip()
+        if chart_id:
+            try:
+                scope_key, _ = _resolve_chart_scope(chart_id)
+                lookup_keys.append(scope_key)
+            except Exception:
+                lookup_keys.append(chart_id)
+        if chart_bazi:
+            lookup_keys.append(chart_bazi.strip())
+        latest = None
+        for key in lookup_keys:
+            try:
+                latest = latest_fn(key)
+            except Exception:  # pragma: no cover
+                latest = None
+            if latest:
+                break
         if not latest:
             return {}
         weights = latest.get("adjusted_weights") or {}
@@ -1245,6 +1462,9 @@ def build_app(config: ConfigLoader) -> FastAPI:
         qizheng_caller = _build_qizheng_caller()
         if qizheng_caller is not None:
             callables["qizheng"] = qizheng_caller
+        ziwei_caller = _build_ziwei_caller()
+        if ziwei_caller is not None:
+            callables["ziwei"] = ziwei_caller
 
         weights = _resolve_system_weights(req, req.bazi)
         analyzer = MultiDestinyAnalyzer(
@@ -1280,10 +1500,13 @@ def build_app(config: ConfigLoader) -> FastAPI:
         qizheng_caller = _build_qizheng_caller()
         if qizheng_caller is not None:
             callables["qizheng"] = qizheng_caller
+        ziwei_caller = _build_ziwei_caller()
+        if ziwei_caller is not None:
+            callables["ziwei"] = ziwei_caller
 
         async def _analyzer(chart_info: Any, question: str) -> Dict[str, Any]:
             analyzer = MultiDestinyAnalyzer(
-                systems=["bazi", "qizheng"],
+                systems=list(callables.keys()) or ["bazi", "qizheng"],
                 callables=callables,
                 config=config.get("bazi_ai") or {},
                 strategy="single",
@@ -1349,10 +1572,52 @@ def build_app(config: ConfigLoader) -> FastAPI:
         config.get("mingmirror_webhook_secret")
         or _os.environ.get("MINGMIRROR_WEBHOOK_SECRET", "")
     ).strip()
+    _mingmirror_env = str(
+        config.get("mingmirror_env")
+        or _os.environ.get("MINGMIRROR_ENV")
+        or _os.environ.get("ENV")
+        or "development"
+    ).strip().lower()
+    _is_production = _mingmirror_env in ("production", "prod", "staging")
+    # Emergency escape hatch for migration only — never leave on in real prod.
+    _allow_insecure_boot = str(
+        _os.environ.get("MINGMIRROR_ALLOW_INSECURE_BOOT")
+        or config.get("mingmirror_allow_insecure_boot")
+        or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if _is_production:
+        missing_secrets = []
+        if not _admin_token:
+            missing_secrets.append("MINGMIRROR_ADMIN_TOKEN")
+        if not _webhook_secret:
+            missing_secrets.append("MINGMIRROR_WEBHOOK_SECRET")
+        if missing_secrets:
+            msg = (
+                f"Production boot refused (MINGMIRROR_ENV={_mingmirror_env}): "
+                f"missing {', '.join(missing_secrets)}. "
+                "Set secrets, or temporarily MINGMIRROR_ALLOW_INSECURE_BOOT=1 "
+                "for emergency migration only."
+            )
+            logger.error(msg)
+            if not _allow_insecure_boot:
+                raise RuntimeError(msg)
+            logger.warning(
+                "MINGMIRROR_ALLOW_INSECURE_BOOT is set — starting without "
+                "required secrets (admin/webhook APIs remain gated at runtime)"
+            )
 
     def _require_admin(request: Request) -> None:
-        """Protect admin read APIs. If token unset, allow in dev (open)."""
+        """Protect admin APIs.
+
+        - production/staging: token must be configured and match
+        - development: open if token unset; if set, must match
+        """
         if not _admin_token:
+            if _is_production:
+                raise HTTPException(
+                    status_code=503,
+                    detail="admin token not configured (set MINGMIRROR_ADMIN_TOKEN)",
+                )
             return
         header = (request.headers.get("X-Admin-Token") or "").strip()
         query_token = (request.query_params.get("admin_token") or "").strip()
@@ -1360,8 +1625,17 @@ def build_app(config: ConfigLoader) -> FastAPI:
             raise HTTPException(status_code=401, detail="admin token required")
 
     def _require_webhook(request: Request) -> None:
-        """Protect payment webhook. If secret unset, allow demo mode."""
+        """Protect payment webhook.
+
+        - production/staging: secret must be configured and match
+        - development: open if secret unset (local demo)
+        """
         if not _webhook_secret:
+            if _is_production:
+                raise HTTPException(
+                    status_code=503,
+                    detail="webhook secret not configured (set MINGMIRROR_WEBHOOK_SECRET)",
+                )
             return
         header = (
             request.headers.get("X-Webhook-Secret")
@@ -1371,7 +1645,38 @@ def build_app(config: ConfigLoader) -> FastAPI:
         if header != _webhook_secret:
             raise HTTPException(status_code=401, detail="invalid webhook secret")
 
-    def _resolve_chart_scope(chart_id: str) -> tuple:
+    def _require_device_id(device_id: str, *, soft: bool = False) -> str:
+        """Normalize device_id; in production require non-empty for chart APIs."""
+        did = (device_id or "").strip()
+        if not did and _is_production and not soft:
+            raise HTTPException(
+                status_code=400,
+                detail="device_id is required",
+            )
+        return did
+
+    def _assert_chart_device_access(
+        chart_id: str, device_id: str = "", *, required: bool = False
+    ) -> None:
+        """Enforce device ownership for UUID charts when owner is set."""
+        if _chart_store is None:
+            return
+        from tools.destiny.chart_store import is_chart_uuid
+
+        key = (chart_id or "").strip()
+        if not is_chart_uuid(key):
+            return
+        did = (device_id or "").strip()
+        try:
+            _chart_store.assert_device_access(
+                key, did, allow_legacy_empty=not (_is_production and required)
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chart not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    def _resolve_chart_scope(chart_id: str, device_id: str = "") -> tuple:
         """Return (event_store_key, bazi_for_analysis) for UUID or legacy bazi."""
         key = (chart_id or "").strip()
         if not key:
@@ -1380,6 +1685,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
             from tools.destiny.chart_store import is_chart_uuid
 
             if is_chart_uuid(key):
+                _assert_chart_device_access(key, device_id)
                 rec = _chart_store.get(key)
                 if rec is None:
                     raise HTTPException(status_code=404, detail="chart not found")
@@ -1550,7 +1856,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
     # ------------------------------------------------------------------
     @app.post("/api/v1/charts", response_model=ChartResponse)
     async def create_chart(req: ChartCreateRequest) -> ChartResponse:
-        """Create (or reuse) a persistent chart with UUID."""
+        """Create (or reuse) a persistent chart with UUID, scoped by device_id."""
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
         from tools.destiny.chart_store import ChartRecord
@@ -1558,8 +1864,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
         bazi = req.bazi.strip()
         if not bazi:
             raise HTTPException(status_code=400, detail="bazi is required")
+        device_id = _require_device_id(req.device_id, soft=not _is_production)
         if req.reuse_existing:
-            existing = _chart_store.get_by_bazi(bazi)
+            existing = _chart_store.get_by_bazi(
+                bazi, device_id=device_id or None
+            )
             if existing is not None:
                 # Refresh birth metadata if provided
                 if req.birth_date or req.birth_time or req.location or req.label:
@@ -1571,6 +1880,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
                         existing.location = req.location
                     if req.label:
                         existing.label = req.label
+                    if device_id and not existing.device_id:
+                        existing.device_id = device_id
                     existing = _chart_store.save(existing)
                 return ChartResponse(**existing.to_dict())
         try:
@@ -1582,6 +1893,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 calendar_type=req.calendar_type,
                 location=req.location,
                 label=req.label,
+                device_id=device_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1589,35 +1901,80 @@ def build_app(config: ConfigLoader) -> FastAPI:
         return ChartResponse(**rec.to_dict())
 
     @app.get("/api/v1/charts", response_model=List[ChartResponse])
-    async def list_charts(limit: int = 50) -> List[ChartResponse]:
+    async def list_charts(
+        limit: int = 50, device_id: str = ""
+    ) -> List[ChartResponse]:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
-        return [ChartResponse(**c.to_dict()) for c in _chart_store.list(limit=limit)]
+        did = _require_device_id(device_id, soft=not _is_production)
+        # Production: only list charts for this device. Dev without device_id:
+        # empty list rather than leaking all charts.
+        if not did:
+            return []
+        return [
+            ChartResponse(**c.to_dict())
+            for c in _chart_store.list(limit=limit, device_id=did)
+        ]
 
     @app.get("/api/v1/charts/{chart_id}", response_model=ChartResponse)
-    async def get_chart(chart_id: str) -> ChartResponse:
+    async def get_chart(chart_id: str, device_id: str = "") -> ChartResponse:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
+        _assert_chart_device_access(chart_id, device_id)
         rec = _chart_store.get(chart_id.strip())
         if rec is None:
             raise HTTPException(status_code=404, detail="chart not found")
         return ChartResponse(**rec.to_dict())
 
     @app.delete("/api/v1/charts/{chart_id}")
-    async def delete_chart(chart_id: str) -> Dict[str, Any]:
+    async def delete_chart(chart_id: str, device_id: str = "") -> Dict[str, Any]:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
+        _assert_chart_device_access(chart_id, device_id)
         ok = _chart_store.delete(chart_id.strip())
         if not ok:
             raise HTTPException(status_code=404, detail="chart not found")
         return {"deleted": True, "id": chart_id}
 
+    def _enforce_package_entitlement(device_id: str) -> None:
+        """Gate 命书交付包 export:校验 can_export_package,非 pro 扣 1 次;无权益→402。
+
+        demo 样例包(/product/demo-charts/{id}/package)与在线阅读(/bazi/report)不经过此闸门。
+        anonymous device_id 模型:抬高门槛(挡随手 curl),非密码学强执行。
+        """
+        if _product_store is None:
+            return  # store 未配置(最小部署)→ 信誉制,不阻拦
+        did = (device_id or "").strip()
+        if not did:
+            raise HTTPException(status_code=402, detail="导出需设备标识,请刷新页面后重试")
+        ent = _product_store.get_entitlement(did).to_dict()
+        if not ent.get("can_export_package"):
+            _product_store.track(
+                "package_export_blocked", device_id=did, props={"reason": "no_entitlement"}
+            )
+            raise HTTPException(
+                status_code=402,
+                detail="完整命书交付包需开通套餐或购买次数,请前往「套餐」页",
+            )
+        if ent.get("plan") != "pro":
+            result = _product_store.consume_credit(did)
+            if not result.get("ok"):
+                _product_store.track(
+                    "package_export_blocked", device_id=did, props={"reason": result.get("reason")}
+                )
+                raise HTTPException(status_code=402, detail="交付包次数已用尽,请前往「套餐」页")
+            _product_store.track(
+                "package_export", device_id=did, props={"reason": result.get("reason")}
+            )
+
     @app.post("/api/v1/charts/{chart_id}/export/package")
     async def export_chart_package(
         chart_id: str,
+        device_id: str = "",
         req: PackageExportOptions = PackageExportOptions(),
     ) -> Dict[str, Any]:
         """Standard product package: 命书 markdown + HTML (print to PDF) + 择日."""
+        _enforce_package_entitlement(device_id)
         opts = req
         if _chart_store is None:
             # Allow legacy bazi-as-id without store for export
@@ -1658,8 +2015,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
         )
 
     @app.post("/api/v1/bazi/export/package")
-    async def export_bazi_package(req: BaziPackageExportRequest) -> Dict[str, Any]:
+    async def export_bazi_package(
+        req: BaziPackageExportRequest,
+        device_id: str = "",
+    ) -> Dict[str, Any]:
         """Export product package from raw birth/bazi payload (no UUID required)."""
+        _enforce_package_entitlement(device_id)
         from tools.bazi_ai.report_export import build_product_package
 
         return build_product_package(
@@ -1979,8 +2340,13 @@ def build_app(config: ConfigLoader) -> FastAPI:
             )
             return {"ok": True, "entitlement": rec.to_dict()}
         if action == "credit":
-            # Soft gate: accept demo code or empty in non-strict demo mode
-            if code and code != _demo_code:
+            # Production requires demo/activation code; empty only allowed in dev.
+            if _is_production:
+                if code != _demo_code:
+                    raise HTTPException(
+                        status_code=403, detail="invalid activation code"
+                    )
+            elif code and code != _demo_code:
                 raise HTTPException(status_code=403, detail="invalid activation code")
             rec = _product_store.add_credits(device_id, n=max(1, min(req.credits, 20)))
             _product_store.track(
@@ -2014,14 +2380,18 @@ def build_app(config: ConfigLoader) -> FastAPI:
         return result
 
     @app.post("/api/v1/charts/{chart_id}/events", response_model=EventResponse)
-    async def create_event(chart_id: str, req: EventCreateRequest) -> EventResponse:
+    async def create_event(
+        chart_id: str,
+        req: EventCreateRequest,
+        device_id: str = "",
+    ) -> EventResponse:
         """Record a life event for a given chart (UUID or legacy bazi)."""
         if _calibrator is None or _event_store is None:
             raise HTTPException(
                 status_code=503,
                 detail="event calibration subsystem not available",
             )
-        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        scope_key, _bazi = _resolve_chart_scope(chart_id, device_id=device_id)
         try:
             from tools.destiny.calibrator import LifeEvent
 
@@ -2043,14 +2413,16 @@ def build_app(config: ConfigLoader) -> FastAPI:
         )
 
     @app.get("/api/v1/charts/{chart_id}/events", response_model=List[EventResponse])
-    async def list_events(chart_id: str) -> List[EventResponse]:
+    async def list_events(
+        chart_id: str, device_id: str = ""
+    ) -> List[EventResponse]:
         """List recorded life events for a given chart."""
         if _calibrator is None or _event_store is None:
             raise HTTPException(
                 status_code=503,
                 detail="event calibration subsystem not available",
             )
-        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        scope_key, _bazi = _resolve_chart_scope(chart_id, device_id=device_id)
         return [
             EventResponse(
                 id=e.id,
@@ -2063,21 +2435,25 @@ def build_app(config: ConfigLoader) -> FastAPI:
         ]
 
     @app.delete("/api/v1/charts/{chart_id}/events/{event_id}")
-    async def delete_event(chart_id: str, event_id: str) -> Dict[str, Any]:
+    async def delete_event(
+        chart_id: str, event_id: str, device_id: str = ""
+    ) -> Dict[str, Any]:
         """Delete a recorded life event."""
         if _event_store is None:
             raise HTTPException(
                 status_code=503,
                 detail="event calibration subsystem not available",
             )
-        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        scope_key, _bazi = _resolve_chart_scope(chart_id, device_id=device_id)
         ok = _event_store.delete(scope_key, event_id.strip())
         if not ok:
             raise HTTPException(status_code=404, detail="event not found")
         return {"deleted": True, "id": event_id}
 
     @app.post("/api/v1/charts/{chart_id}/calibrate", response_model=CalibrationResponse)
-    async def calibrate_chart(chart_id: str) -> CalibrationResponse:
+    async def calibrate_chart(
+        chart_id: str, device_id: str = ""
+    ) -> CalibrationResponse:
         """Calibrate destiny system weights against recorded events."""
         if _calibrator is None or _event_store is None:
             raise HTTPException(
@@ -2086,7 +2462,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
             )
         from tools.destiny.contract import ChartInfo
 
-        scope_key, bazi = _resolve_chart_scope(chart_id)
+        scope_key, bazi = _resolve_chart_scope(chart_id, device_id=device_id)
         chart = ChartInfo(bazi=bazi)
         result = await _calibrator.calibrate(
             chart, storage_key=scope_key
@@ -2103,7 +2479,9 @@ def build_app(config: ConfigLoader) -> FastAPI:
         )
 
     @app.get("/api/v1/charts/{chart_id}/calibrate/latest", response_model=CalibrationResponse)
-    async def latest_calibration(chart_id: str) -> CalibrationResponse:
+    async def latest_calibration(
+        chart_id: str, device_id: str = ""
+    ) -> CalibrationResponse:
         """Return the most recently persisted calibration for a chart."""
         if _event_store is None:
             raise HTTPException(
@@ -2116,7 +2494,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
                 status_code=501,
                 detail="event store does not support calibration history",
             )
-        scope_key, _bazi = _resolve_chart_scope(chart_id)
+        scope_key, _bazi = _resolve_chart_scope(chart_id, device_id=device_id)
         result = latest_fn(scope_key)
         if not result:
             raise HTTPException(status_code=404, detail="no calibration found")
@@ -2192,7 +2570,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
 async def run_server(config: ConfigLoader, *, host: str, port: int) -> None:
     import uvicorn
 
-    app = build_app(config)
+    try:
+        app = build_app(config)
+    except RuntimeError as exc:
+        # Production missing secrets: fail fast before binding the port.
+        logger.error("Server failed to start: %s", exc)
+        raise SystemExit(2) from exc
     uv_config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(uv_config)
     await server.serve()

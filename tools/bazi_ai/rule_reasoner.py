@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from tools.bazi_ai.bazi_structural import _ELEMENT, shishen_for_stem
 from tools.bazi_ai.bazi_validator import extract_pillars
@@ -205,25 +205,29 @@ def _restrains(a_gan: str, b_gan: str) -> bool:
 # 因此引擎只在大 margin 时覆盖 LLM（见 _best_candidate 的 margin 置信度）。
 # ---------------------------------------------------------------------------
 YEAR_SIGNAL_WEIGHTS: Dict[str, float] = {
-    # —— 正向信号（按 logreg 系数四舍五入）——
-    "stem_wuhe_daymaster": 0.9,   # 天干五合（修复死代码后）logreg +0.88
-    "tian_kang_di_chong": 0.5,    # 天克地冲（流年 vs 日柱）+0.55
-    "branch_sanhe_palace": 0.4,   # 流年地支半三合事件宫 +0.40
-    "parent_guansha_ke": 0.4,     # 父母去世题：流年天干官杀克身 +0.37
-    "dayun_stem_star": 0.3,       # 大运天干为目标十神 +0.34
-    "fan_yin_day_branch": 0.3,    # 反吟：流年地支冲日支 +0.30
-    "dayun_chong_palace": 0.3,    # 大运地支冲事件宫 +0.28
-    "dayun_liuhe_palace": 0.2,    # 大运地支合事件宫 +0.21
-    "fu_yin_day_branch": 0.2,     # 伏吟：流年地支同日支 +0.17
-    "dayun_hidden_star": 0.1,     # 大运地支藏干为目标十神 +0.10
-    "branch_chong_palace": 0.1,   # 流年地支冲事件宫 +0.05（接近中性）
-    # —— 反向/噪声信号，置 0 防止误导 ——
-    "stem_star": 0.0,             # 流年天干明现目标十神（反向 −0.18）
-    "hidden_star": 0.0,           # 流年地支藏干目标十神（反向 −0.37）
-    "branch_sanhui_palace": 0.0,  # 半三会（反向 −0.40）
-    "dayun_sanhe_palace": 0.0,    # 大运半三合事件宫（反向 −0.23）
-    "branch_liuhe_palace": 0.0,   # 流年地支合事件宫（中性 −0.06）
-    "sui_yun_bing_lin": 0.0,      # 岁运并临（噪声 −0.10）
+    # 2026-07-19 LOO recalib (rule_calibrate_v2): coordinate ascent on
+    # contest8 year-asking n=44.  Full top1 36.4%→45.5%, top2 54.5%→61.4%;
+    # soft-shortlist sim top2 60.6%→69.6% (fewer fires, higher quality).
+    # —— 正向 ——
+    "stem_wuhe_daymaster": 0.9,   # 天干五合（保持）
+    "tian_kang_di_chong": 0.5,    # 天克地冲（保持）
+    "parent_guansha_ke": 0.4,     # 官杀克身（父母/官非）
+    "dayun_stem_star": 0.3,       # 大运天干目标十神
+    "dayun_chong_palace": 0.3,    # 大运冲事件宫
+    "branch_sanhe_palace": 0.2,   # 半三合（0.4→0.2，降权减噪）
+    "dayun_liuhe_palace": 0.2,    # 大运合事件宫
+    "fu_yin_day_branch": 0.2,     # 伏吟
+    "dayun_hidden_star": 0.1,     # 大运藏干目标十神
+    # —— 反向/降权（标定：在错误选项上触发更多）——
+    "fan_yin_day_branch": -0.2,   # 反吟 0.3→−0.2
+    "branch_chong_palace": -0.2,  # 流年冲宫 0.1→−0.2
+    # —— 噪声，置 0 ——
+    "stem_star": 0.0,
+    "hidden_star": 0.0,
+    "branch_sanhui_palace": 0.0,
+    "dayun_sanhe_palace": 0.0,
+    "branch_liuhe_palace": 0.0,
+    "sui_yun_bing_lin": 0.0,
 }
 
 # 置信度 margin 阈值（top1 与 top2 的分差）。LOO 标定：
@@ -323,8 +327,8 @@ def _year_feature_vector(
     elif _is_chong(year_zhi, day_branch):
         feats["fan_yin_day_branch"] += 1
 
-    # 父母去世题：流年天干官杀克身
-    if qtype_kind == "parent" and year_shishen in ("七杀", "正官"):
+    # 父母去世 / 官非：流年天干官杀克身（官杀为压力/官方星）
+    if qtype_kind in ("parent", "legal") and year_shishen in ("七杀", "正官"):
         feats["parent_guansha_ke"] += 1
 
     # 大运引动
@@ -450,7 +454,8 @@ class RuleReasoner:
         return ["正官", "七杀"] if self.gender in ("male", "男", "m", "M") else ["食神", "伤官"]
 
     def _parent_stars(self) -> Tuple[List[str], List[str]]:
-        return ["偏财"], ["正印"]  # father, mother
+        # Dual-star: 父偏财+正财, 母正印+偏印 (align with liuqin_profile merge)
+        return ["偏财", "正财"], ["正印", "偏印"]
 
     def reason_marriage_year(self, question: str, options: List[str]) -> Optional[Candidate]:
         """Pick the option whose year most strongly activates spouse star / palace."""
@@ -664,10 +669,12 @@ class RuleReasoner:
     _KW_MOVE = ("搬迁", "搬家", "迁居", "移居", "出国", "到香港", "移民")
     _KW_LEGAL = ("官非", "牢狱", "警察", "扣留", "官司", "入狱", "被抓")
 
-    # Event kinds allowed into the soft shortlist.  ``children`` is excluded for
-    # now: offline top-2 hit on contest8 is only ~25% (worse than chance for a
-    # 2-of-4 shortlist), so injecting it actively misleads the LLM.
-    _SHORTLIST_KINDS = frozenset({"marriage", "parent", "move", "legal", "generic"})
+    # Soft shortlist kinds.  ``children`` re-enabled with the same score gate as
+    # marriage/generic (see rank_year_candidates): full top-2 hit is weak (~25%),
+    # but score≥0.4 top-1 slices include gold cases like contest8 P026-Q8.
+    _SHORTLIST_KINDS = frozenset(
+        {"marriage", "parent", "move", "legal", "generic", "children"}
+    )
 
     # Hard override DISABLED after year-parse expansion (2026-07-13): the
     # high-margin slice fell to ~20% top-1 on contest8, so skipping the LLM
@@ -763,8 +770,10 @@ class RuleReasoner:
             return self._rank_candidates(cands)
 
         if kind == "legal":
+            # 官非应期落在「自身」日支宫 + 官杀星，而非夫妻宫
+            # （配偶宫会把婚姻冲合噪声混入，压低真官非年如 P031-Q33）。
             cands = self._score_year_options(
-                options, ["正官", "七杀"], self.spouse_palace, "legal"
+                options, ["正官", "七杀"], self.pillars[2][1], "legal"
             )
             return self._rank_candidates(cands)
 
@@ -798,10 +807,12 @@ _YEAR_ASKING_KW = (
     "那一年", "哪一年份", "哪一年份",
 )
 
-# Kinds that always get shortlist (offline top-2 strong).
-_SHORTLIST_ALWAYS_KINDS = frozenset({"parent", "move", "legal"})
-# Kinds that need medium+ margin before injection (noisier top-2).
-_SHORTLIST_GATED_KINDS = frozenset({"marriage", "generic"})
+# Kinds that always get shortlist when score > 0 (historically stronger top-2).
+# ``legal`` moved to gated: weak signals (e.g. 伏吟-only score 0.2 on P031-Q33)
+# actively mislead the LLM when gold is not in top-2.
+_SHORTLIST_ALWAYS_KINDS = frozenset({"parent", "move"})
+# Kinds that need medium+ margin / score floor before injection (noisier top-2).
+_SHORTLIST_GATED_KINDS = frozenset({"marriage", "generic", "children", "legal"})
 
 
 def is_year_asking_question(question: str, options: Optional[List[str]] = None) -> bool:
@@ -871,11 +882,12 @@ def rank_year_candidates(
             best = ranked[0]
             if best.score <= 0:
                 return []
-            # marriage/generic: need meaningful signal + non-low margin.
-            # Weak medium (e.g. score 0.3 over 0.1) previously misled the LLM
-            # (P018-Q7 in n50 LOO).
+            # marriage/generic/children/legal: need non-low margin + absolute floor.
+            # Floor was 0.4 under pre-2026-07-19 weights; after LOO recalib
+            # (半三合 0.4→0.2 等) the same cases land ~0.2–0.3, so floor is 0.2.
+            # Confidence still requires margin ≥ MED (medium), filtering pure noise.
             if kind in _SHORTLIST_GATED_KINDS:
-                if best.confidence == "low" or best.score < 0.4:
+                if best.confidence == "low" or best.score < 0.2:
                     return []
             if kind not in _SHORTLIST_ALWAYS_KINDS and kind not in _SHORTLIST_GATED_KINDS:
                 return []
@@ -1021,42 +1033,337 @@ def _element_extremes(profile: Dict) -> Tuple[str, str]:
     return "", ""
 
 
-def format_domain_hint_block(bazi: str, question: str, *, gender: str = "male") -> str:
+_MARRIAGE_STABLE_KW = (
+    "美满", "幸福", "稳定", "顺利", "和睦", "圆满", "恩爱", "白头", "早婚幸福",
+    "婚姻美满", "感情顺利", "一世", "从一而终", "已结婚且婚姻状况良好",
+)
+_MARRIAGE_UNSTABLE_KW = (
+    "离婚", "离异", "波折", "不顺", "多段", "再婚", "二婚", "晚婚", "未婚",
+    "单身", "分居", "出轨", "是非", "辛苦", "聚少", "无正缘", "难成", "破裂",
+    "复杂", "多次", "第几段",
+)
+_KIN_GOOD_KW = ("和睦", "融洽", "支持", "富裕", "幸福", "依赖", "良好", "亲近")
+_KIN_HARD_KW = ("疏离", "不和", "早逝", "早年辛苦", "贫困", "无助力", "淡薄", "紧张", "分居", "单亲")
+
+
+def _option_letter_text(options: Sequence[str]) -> List[Tuple[str, str]]:
+    labels = [chr(ord("A") + i) for i in range(len(options))]
+    out: List[Tuple[str, str]] = []
+    for lab, text in zip(labels, options):
+        out.append((lab, str(text or "")))
+    return out
+
+
+def _marriage_option_notes(
+    options: Sequence[str],
+    *,
+    spouse_weak: bool,
+    palace_unstable: bool,
+) -> List[str]:
+    """Soft demotion/promotion notes for marriage-status option wording."""
+    if not options:
+        return []
+    notes: List[str] = []
+    if not (spouse_weak or palace_unstable):
+        # Mild: demote extreme instability only when structure is strong+stable
+        for lab, text in _option_letter_text(options):
+            if any(k in text for k in ("多次离婚", "三段以上", "婚姻极差")):
+                notes.append(f"{lab}措辞偏极端破裂，与「星强宫稳」略不合，宜降权")
+        return notes
+
+    demote: List[str] = []
+    promote: List[str] = []
+    for lab, text in _option_letter_text(options):
+        has_stable = any(k in text for k in _MARRIAGE_STABLE_KW)
+        has_unst = any(k in text for k in _MARRIAGE_UNSTABLE_KW)
+        if has_stable and not has_unst:
+            demote.append(lab)
+        elif has_unst and not has_stable:
+            promote.append(lab)
+        elif has_stable and has_unst:
+            # mixed wording — leave to model
+            pass
+    if demote:
+        reason = "配偶星弱/不现" if spouse_weak else "夫妻宫冲刑"
+        if spouse_weak and palace_unstable:
+            reason = "星弱+宫不稳"
+        notes.append(
+            f"- 选项措辞降权（{reason}，勿首选「美满/稳定」类）："
+            + "、".join(demote)
+        )
+    if promote:
+        notes.append(
+            "- 选项措辞较贴波折/离异/晚婚/多段结构，可优先对照："
+            + "、".join(promote)
+        )
+    return notes
+
+
+def _format_liuqin_domain_hints(
+    bazi: str,
+    question: str,
+    *,
+    gender: str = "male",
+    options: Optional[Sequence[str]] = None,
+) -> str:
+    """Marriage / kinship structural hints from liuqin_profile (no hard letter pick)."""
+    try:
+        from tools.bazi_ai import bazi_structural
+    except Exception:
+        return ""
+    lq = bazi_structural.liuqin_profile(bazi, gender=gender)
+    if not lq:
+        return ""
+    q = question or ""
+    want_marriage = any(
+        k in q
+        for k in (
+            "婚姻", "感情", "结婚", "离婚", "配偶", "妻子", "丈夫", "恋爱",
+            "拍拖", "再婚", "二婚", "第几段", "桃花",
+        )
+    )
+    want_kin = any(
+        k in q
+        for k in (
+            "父", "母", "子", "女", "孩子", "子女", "兄弟", "姐妹",
+            "六亲", "家庭", "原生", "祖上", "父母",
+        )
+    )
+    if not want_marriage and not want_kin:
+        return ""
+
+    lines = ["【六亲/婚姻结构提示（非选项排名，禁止当作标准答案）】"]
+    g = lq.get("gender") or gender
+    spouse = lq.get("spouse") or {}
+    sp_pal = lq.get("spouse_palace") or {}
+    father = lq.get("father") or {}
+    mother = lq.get("mother") or {}
+    son = lq.get("son") or {}
+    daughter = lq.get("daughter") or {}
+    ch_pal = lq.get("children_palace") or {}
+    pa_pal = lq.get("parents_palace") or {}
+
+    # Clash / harm on day branch from structural di_zhi text if present.
+    try:
+        prof = bazi_structural.structural_profile(bazi) or {}
+        dz_text = str(prof.get("di_zhi_comprehensive_text") or "")
+    except Exception:
+        dz_text = ""
+    day_zhi = (sp_pal.get("branch") or "")
+    palace_unstable = bool(day_zhi) and any(
+        tag in dz_text and day_zhi in dz_text
+        for tag in ("冲", "刑", "害", "破")
+    )
+    # Also flag if description mentions 冲 on 日支
+    if day_zhi and dz_text and re.search(rf"{day_zhi}.{{0,6}}(冲|刑|害)", dz_text):
+        palace_unstable = True
+    # 日支本气为比劫：争合不专（尤女命），视同宫位不稳信号
+    sp_main = str(sp_pal.get("shishen_main") or "")
+    if sp_main in ("比肩", "劫财", "比劫"):
+        palace_unstable = True
+
+    spouse_weak = False
+    if want_marriage:
+        star = spouse.get("star") or ("正财" if g == "male" else "正官")
+        exists = bool(spouse.get("exists"))
+        strength = spouse.get("strength") or "弱"
+        support = spouse.get("support_text") or ""
+        spouse_weak = (not exists) or strength == "弱"
+        lines.append(
+            f"- 配偶星（{star}）：{'现' if exists else '不现'}；强弱参考={strength}；{support}"
+        )
+        if spouse.get("description"):
+            lines.append(f"- 配偶星落点：{spouse.get('description')}")
+        if sp_pal.get("description"):
+            lines.append(f"- {sp_pal.get('description')}")
+        tips = []
+        if spouse_weak:
+            tips.append("配偶星弱/不现 → 婚姻助力弱、易晚婚或聚少离多，勿首选「美满稳定」")
+        if strength == "强" and not palace_unstable:
+            tips.append("配偶星有力且夫妻宫无明显冲刑 → 较支持稳定婚配")
+        if palace_unstable:
+            tips.append("夫妻宫（日支）逢冲刑害/比劫坐支 → 感情波折/争合/离异象更重")
+        if sp_main in ("比肩", "劫财", "比劫"):
+            tips.append("日支比劫 → 配偶宫不专，忌轻易断「婚姻美满稳定」")
+        if g == "female" and exists and strength == "弱":
+            tips.append("女命官杀弱 → 正缘偏晚或不顺，忌轻易断「早婚幸福」")
+        if g == "male" and exists and strength == "弱":
+            tips.append("男命财星弱 → 妻缘助力不足，财妻同论时偏紧")
+        if palace_unstable and spouse_weak:
+            tips.append("宫位不稳+星弱 → 多重婚姻/离异后再婚的结构支持度高于「一世一婚圆满」")
+        if tips:
+            lines.append("- 婚姻取象：" + "；".join(tips))
+        if options:
+            lines.extend(
+                _marriage_option_notes(
+                    options,
+                    spouse_weak=spouse_weak,
+                    palace_unstable=palace_unstable,
+                )
+            )
+
+    if want_kin:
+        if any(k in q for k in ("父", "母", "父母", "家庭", "原生", "祖上")):
+            if father.get("description"):
+                lines.append(
+                    f"- 父亲：{father.get('description')}（强弱={father.get('strength', '?')}）"
+                )
+            if mother.get("description"):
+                lines.append(
+                    f"- 母亲：{mother.get('description')}（强弱={mother.get('strength', '?')}）"
+                )
+            if pa_pal.get("description"):
+                lines.append(f"- {pa_pal.get('description')}")
+            f_s, m_s = father.get("strength"), mother.get("strength")
+            if f_s == "弱" and m_s == "弱":
+                lines.append("- 父母双星偏弱 → 原生家庭助力有限/关系疏离或早年辛苦更贴")
+            elif f_s == "强" or m_s == "强":
+                lines.append("- 父或母星有力 → 至少一方可依赖/背景不至于极差，对照选项措辞")
+        if any(k in q for k in ("子", "女", "孩子", "子女", "小孩")):
+            if son.get("description"):
+                lines.append(f"- 儿子星：{son.get('description')}（{son.get('strength', '?')}）")
+            if daughter.get("description"):
+                lines.append(
+                    f"- 女儿星：{daughter.get('description')}（{daughter.get('strength', '?')}）"
+                )
+            if ch_pal.get("description"):
+                lines.append(f"- {ch_pal.get('description')}")
+            child_weak = (
+                (son.get("strength") == "弱" or not son.get("exists"))
+                and (daughter.get("strength") == "弱" or not daughter.get("exists"))
+            )
+            if child_weak:
+                lines.append("- 子女星整体偏弱 → 子女缘薄/晚得/辛苦，勿首选「子女双全顺利」")
+
+    lines.append("- 请用以上星宫强弱映射选项措辞，勿编造命局不支持的人生细节。")
+    return "\n".join(lines)
+
+
+_CAREER_GOV_KW = (
+    "公职", "公务员", "政府", "机构", "稳定岗", "体制", "上班族", "国企", "事业编",
+    "机关", "教师编", "银行柜", "稳定工作",
+)
+_CAREER_TECH_KW = (
+    "技术", "电脑", "IT", "专业", "研发", "工程", "技工", "设计", "程序员", "自由职业",
+    "文艺", "艺术", "创作",
+)
+_CAREER_BIZ_KW = (
+    "创业", "生意", "商贸", "老板", "自营", "销售", "奔波", "合伙", "做生意", "开店",
+    "贸易", "中介", "业务",
+)
+
+
+def _career_option_notes(options: Sequence[str], flags: Dict[str, bool]) -> List[str]:
+    """Soft promote/demote career option wording from 十神 flags (no hard pick)."""
+    if not options:
+        return []
+    # Primary structural buckets (priority order).
+    prefer_gov = bool(flags.get("官杀") and flags.get("印"))
+    prefer_tech = bool(flags.get("食伤") and not flags.get("官杀"))
+    prefer_biz = bool(
+        (flags.get("食伤") and flags.get("财"))
+        or (flags.get("财") and not flags.get("官杀"))
+        or (flags.get("比劫") and flags.get("财"))
+    )
+    # If both tech and biz fire, keep both as soft promote.
+    gov_labs, tech_labs, biz_labs = [], [], []
+    for lab, text in _option_letter_text(options):
+        if any(k in text for k in _CAREER_GOV_KW):
+            gov_labs.append(lab)
+        if any(k in text for k in _CAREER_TECH_KW):
+            tech_labs.append(lab)
+        if any(k in text for k in _CAREER_BIZ_KW):
+            biz_labs.append(lab)
+    notes: List[str] = []
+    if prefer_gov and gov_labs:
+        notes.append("- 选项措辞贴官印（公职/机构/稳定岗），可优先对照：" + "、".join(gov_labs))
+        demote = sorted(set(tech_labs + biz_labs) - set(gov_labs))
+        if demote:
+            notes.append("- 相对降权（与官印结构略疏）：" + "、".join(demote))
+    elif prefer_tech and tech_labs:
+        notes.append("- 选项措辞贴食伤泄秀（技术/自由/文艺），可优先对照：" + "、".join(tech_labs))
+        if gov_labs and not flags.get("官杀"):
+            notes.append("- 官星不显 → 降权公职/稳定岗类：" + "、".join(gov_labs))
+    elif prefer_biz and biz_labs:
+        notes.append("- 选项措辞贴食伤财/比劫财（创业商贸/销售奔波），可优先对照：" + "、".join(biz_labs))
+        if gov_labs and not flags.get("官杀"):
+            notes.append("- 官星不显 → 降权公职/稳定岗类：" + "、".join(gov_labs))
+    return notes
+
+
+def format_domain_hint_block(
+    bazi: str,
+    question: str,
+    *,
+    gender: str = "male",
+    include_career_wealth: bool = False,
+    options: Optional[Sequence[str]] = None,
+) -> str:
     """Structural reading hints for non-year MCQs — **no option ranking**.
 
     Offline option-ranking top-2 is only ~55% on contest8 domain questions, so
     listing A/B letters would often mislead.  Instead we inject the chart's
     十神/旺衰 implications and let the LLM map them to options.
+
+    Always-on domains: marriage/kinship (liuqin), career, education.
+    Gated by *include_career_wealth* (``--domain-hints``): wealth, health
+    (historically noisier when always-on with other experiments).
+
+    *options*: soft-tag option wording (婚姻「美满」降权 / 职业桶对照) without
+    hard-picking a letter.
     """
     if not bazi:
         return ""
-    if is_year_asking_question(question, None):
+    if is_year_asking_question(question, list(options) if options else None):
+        # Pure year MCQs use year shortlist; year gate wins over domain hints.
         return ""
     try:
         from tools.bazi_ai import bazi_structural
     except Exception:
         return ""
+
+    liuqin_block = _format_liuqin_domain_hints(
+        bazi, question, gender=gender, options=options
+    )
+
     profile = bazi_structural.structural_profile(bazi)
     if not profile:
-        return ""
+        return liuqin_block
 
     q = question
     domain = ""
     if any(k in q for k in ("职业", "工作", "事业", "从事", "行业", "职位")):
         domain = "career"
-    elif any(k in q for k in ("学历", "读书", "学业", "毕业", "学校")):
+    elif any(k in q for k in ("学历", "读书", "学业", "毕业", "学校", "科系", "文凭")):
         domain = "education"
     elif any(k in q for k in ("病", "疾", "健康", "身体", "受伤", "手术", "困扰")):
         domain = "health"
-    elif any(k in q for k in ("财运", "财富", "有钱", "贫富", "收入", "资产", "财运")):
+    elif any(k in q for k in ("财运", "财富", "有钱", "贫富", "收入", "资产")):
         domain = "wealth"
-    else:
-        return ""
+
+    # Career/education always eligible; wealth/health need experimental flag.
+    always_struct = domain in ("career", "education")
+    gated_struct = domain in ("wealth", "health") and include_career_wealth
+    if not always_struct and not gated_struct:
+        return liuqin_block
 
     flags = _shishen_presence(profile)
     strength = profile.get("strength", "中和")
-    useful = list(profile.get("useful_gods") or [])
-    taboo = list(profile.get("taboo_gods") or [])
+
+    def _as_god_list(val) -> List[str]:
+        if not val:
+            return []
+        if isinstance(val, str):
+            return [x.strip() for x in val.replace("，", ",").split(",") if x.strip()]
+        out: List[str] = []
+        for x in val:
+            s = str(x).strip().strip(",")
+            if s and s != ",":
+                out.append(s)
+        return out
+
+    useful = _as_god_list(profile.get("useful_gods"))
+    taboo = _as_god_list(profile.get("taboo_gods"))
     day_master = profile.get("day_master", "")
 
     lines = [
@@ -1073,15 +1380,21 @@ def format_domain_hint_block(bazi: str, question: str, *, gender: str = "male") 
             tips.append("官印相生 → 优先考虑公职/机构/稳定岗位")
         if flags["食伤"] and flags["财"]:
             tips.append("食伤生财 → 技艺、商贸、创业类更贴")
+        elif flags["食伤"] and not flags["官杀"]:
+            tips.append("食伤泄秀、官星不显 → 技术/自由/文艺倾向（勿硬套公职）")
         elif flags["食伤"]:
-            tips.append("食伤泄秀、官星不显 → 技术/自由/文艺倾向")
+            tips.append("食伤泄秀 → 技术/表达/技艺象")
         if flags["财"] and not flags["官杀"]:
             tips.append("财星显而官弱 → 偏商业/求财，非典型公职")
         if flags["比劫"] and flags["财"]:
             tips.append("比劫见财 → 合伙/竞争/销售奔波象")
+        if flags["官杀"] and not flags["印"]:
+            tips.append("有官杀无印 → 压力岗/管理/变动，未必清闲编制")
         if not tips:
             tips.append("按用神喜忌与食伤/官杀强弱，在选项中找最贴的职业象")
         lines.append("- 职业倾向：" + "；".join(tips))
+        if options:
+            lines.extend(_career_option_notes(options, flags))
     elif domain == "education":
         if flags["印"] and strength != "偏弱":
             lines.append("- 学业：印星有力 → 学历偏中高，科班/文职象更强")
@@ -1119,7 +1432,10 @@ def format_domain_hint_block(bazi: str, question: str, *, gender: str = "male") 
                 lines.append(f"- 忌神{taboo}对应系统亦需注意：{'、'.join(t_orgs)}")
 
     lines.append("- 请用以上结构线索映射选项，勿编造命局不支持的事件。")
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    if liuqin_block:
+        return body + "\n" + liuqin_block
+    return body
 
 
 def rank_domain_candidates(
@@ -1265,13 +1581,79 @@ def arbitrate_shortlist(
         return "", "empty"
     if free_pred == guided_pred:
         return free_pred, "agree"
-    sl_opts = {c.option for c in shortlist}
-    if free_pred in sl_opts:
-        return free_pred, "free_in_shortlist"
+    sl_letters = {(c.option or "").strip().upper()[:1] for c in shortlist if c.option}
     best = shortlist[0] if shortlist else None
+    top_l = (best.option or "").strip().upper()[:1] if best else ""
+    # Free already equals shortlist top-1 → trust free (rules + free agree).
+    if free_pred and free_pred == top_l:
+        return free_pred, "free_is_top1"
+    # Free outside shortlist but guided hits top-1 with decent score → guided.
+    if (
+        free_pred
+        and free_pred not in sl_letters
+        and guided_pred == top_l
+        and best
+        and best.score >= 0.4
+    ):
+        return guided_pred, "guided_top1_free_out"
+    # Strong symbolic top-1: prefer guided when free wandered.
     if best and best.confidence == "high" and best.score >= 0.5:
-        return guided_pred, "guided_high_conf"
+        if guided_pred == top_l:
+            return guided_pred, "guided_high_conf"
+        if free_pred not in sl_letters and guided_pred in sl_letters:
+            return guided_pred, "guided_high_conf_sl"
+    # Free is a non-top shortlist member (weak #2): prefer guided top-1 if present.
+    if free_pred in sl_letters and guided_pred == top_l and best and best.score >= 0.4:
+        return guided_pred, "guided_top1_over_weak_free"
     return free_pred, "free_fallback"
+
+
+def prefer_shortlist_after_llm(
+    predicted: str,
+    shortlist: Sequence[Candidate],
+) -> Tuple[Optional[str], str]:
+    """Post-LLM shortlist trust: override model when it wanders outside shortlist.
+
+    Only fires when the model pick is **not** in the shortlist.  Overriding a
+    model that already chose shortlist #2 with a high-margin (but wrong) top-1
+    hurt full-set accuracy (contest8 n200 P016-Q37: gold C overwritten to A).
+
+    Policy (outside-shortlist only):
+    - top score ≥ 0.6 → force top-1
+    - top score ≥ 0.5 and margin ≥ 0 → force top-1
+
+    Returns ``(override_letter_or_None, reason_tag)``.
+    """
+    pred = (predicted or "").strip().upper()[:1]
+    if not shortlist:
+        return None, "no_shortlist"
+    top = shortlist[0]
+    top_l = (top.option or "").strip().upper()[:1]
+    if not top_l:
+        return None, "empty_top"
+    top_s = float(top.score or 0.0)
+    second_s = float(shortlist[1].score or 0.0) if len(shortlist) > 1 else 0.0
+    margin = top_s - second_s
+    sl_letters = {
+        (c.option or "").strip().upper()[:1] for c in shortlist if c.option
+    }
+
+    # Never displace a model pick already inside the shortlist.
+    if pred and pred in sl_letters:
+        return None, "keep_llm_in_sl"
+    if not pred:
+        # Empty parse: fall back to strong top-1 if available.
+        if top_s >= 0.4:
+            return top_l, "empty_pred_fallback"
+        return None, "empty_pred"
+    if top_s >= 0.6:
+        return top_l, "high_score_outside_sl"
+    # Model wandered completely outside a decent shortlist (margin vs runner-up).
+    if top_s >= 0.4 and margin >= 0.25:
+        return top_l, "mid_score_outside_sl"
+    if top_s >= 0.5 and margin >= 0.0:
+        return top_l, "mid_score_outside_sl"
+    return None, "keep_llm"
 
 
 def apply_rule_reasoner(

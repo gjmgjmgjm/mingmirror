@@ -13,13 +13,12 @@ import {
 } from "../api/client";
 import {
   canExportFullPackage,
-  consumePackageCreditAsync,
-  getEntitlement,
 } from "../lib/entitlements";
-import { track } from "../lib/analytics";
+import { track, getDeviceId } from "../lib/analytics";
 import { ELEMENT_META, type Element } from "../lib/bazi";
 import ChartLoader from "../components/ChartLoader";
 import PillarsChart from "../components/PillarsChart";
+import ShareCard from "../components/ShareCard";
 import {
   SectionCard,
   InfoCard,
@@ -37,6 +36,8 @@ const BORDER_BY_ID: Record<string, "vermilion" | "gold" | "jade" | "ink"> = {
   yongshen: "jade",
   shensha: "vermilion",
   dayun: "gold",
+  year_timing: "jade",
+  liuqin_dossier: "jade",
   summary: "jade",
 };
 
@@ -427,6 +428,221 @@ function SectionBody({
         </>
       );
 
+    case "year_timing": {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cands: any[] = Array.isArray(d.candidates) ? d.candidates : [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridge: any = d.liuqin_bridge || {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridgeSamples: any[] = Array.isArray(bridge.samples)
+        ? bridge.samples
+        : [];
+      return (
+        <>
+          {d.copy && (
+            <p className="mb-3 text-sm leading-relaxed text-ink-600 dark:text-ink-300">
+              {d.copy}
+            </p>
+          )}
+          {cands.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-ink-200/60 dark:border-ink-600/40">
+              <table className="w-full min-w-[280px] text-left text-sm">
+                <thead className="bg-ink-100/60 text-xs text-ink-500 dark:bg-ink-800/60 dark:text-ink-400">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">候选</th>
+                    <th className="px-3 py-2 font-medium">干支</th>
+                    <th className="px-3 py-2 font-medium">分</th>
+                    <th className="px-3 py-2 font-medium">信号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cands.map((c, i) => (
+                    <tr
+                      key={i}
+                      className={`border-t border-ink-200/40 dark:border-ink-600/30 ${
+                        c.liuqin_overlap ? "bg-amber-500/5" : ""
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-medium text-ink-800 dark:text-ink-100">
+                        {c.option_letter ? `${c.option_letter} ` : ""}
+                        {c.year || "—"}
+                        {c.liuqin_overlap ? (
+                          <span className="ml-1 text-[10px] text-amber-700">
+                            六亲重合
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2">{c.gan_zhi || "—"}</td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {typeof c.score === "number" ? c.score.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-ink-500">
+                        {(c.reasons || []).slice(0, 3).join("；") || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {bridgeSamples.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1 text-xs text-ink-500">
+                六亲流年象征取样（联动 · 非断言）
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {bridgeSamples.slice(0, 8).map((s, i) => (
+                  <span
+                    key={i}
+                    className="rounded-lg bg-amber-500/10 px-2 py-1 text-xs"
+                    title={s.note}
+                  >
+                    {s.member_label} {s.year}年 {s.pillar}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {d.disclaimer && (
+            <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">{d.disclaimer}</p>
+          )}
+        </>
+      );
+    }
+
+    case "liuqin_dossier": {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const members: Record<string, any> = d.members || {};
+      const order = [
+        "father",
+        "mother",
+        "spouse",
+        "son",
+        "daughter",
+        "brother",
+        "sister",
+      ];
+      return (
+        <>
+          {d.children_bias && (
+            <p className="mb-3 text-sm text-ink-600 dark:text-ink-300">
+              <span className="font-medium">子女星偏向：</span>
+              {d.children_bias}
+            </p>
+          )}
+          <div className="space-y-4">
+            {order.map((key) => {
+              const m = members[key];
+              if (!m) return null;
+              const t = m.timing || {};
+              const palace = m.palace || {};
+              return (
+                <div
+                  key={key}
+                  className="rounded-xl border border-ink-200/50 p-3 dark:border-ink-600/40"
+                >
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink-800 dark:text-ink-100">
+                      {m.label}
+                    </span>
+                    <span className="text-sm text-ink-500">{m.star}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        m.strength === "强"
+                          ? "bg-jade/15 text-jade"
+                          : "bg-ink-200/70 text-ink-600 dark:bg-ink-700 dark:text-ink-300"
+                      }`}
+                    >
+                      {m.strength}
+                    </span>
+                    {m.dual_star_note ? (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                        双星合参
+                      </span>
+                    ) : null}
+                  </div>
+                  <ul className="space-y-1 text-sm text-ink-700 dark:text-ink-200">
+                    {m.dual_star_note ? (
+                      <li>
+                        <span className="text-ink-500">双星：</span>
+                        {m.dual_star_note}
+                      </li>
+                    ) : null}
+                    {palace.palace_note ? (
+                      <li>
+                        <span className="text-ink-500">宫位：</span>
+                        {palace.palace_note}
+                      </li>
+                    ) : null}
+                    <li>
+                      <span className="text-ink-500">性格：</span>
+                      {m.character}
+                    </li>
+                    <li>
+                      <span className="text-ink-500">能力：</span>
+                      {m.ability}
+                    </li>
+                    <li>
+                      <span className="text-ink-500">健康：</span>
+                      {m.health}
+                    </li>
+                    <li>
+                      <span className="text-ink-500">与命主：</span>
+                      {m.relation}
+                    </li>
+                    <li>
+                      <span className="text-ink-500">应期：</span>
+                      {t.favorable_hint}
+                    </li>
+                  </ul>
+                  {Array.isArray(t.dayun_highlights) && t.dayun_highlights.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {t.dayun_highlights.map(
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        (h: any, i: number) => (
+                          <span
+                            key={i}
+                            className="rounded-lg bg-jade/10 px-2 py-1 text-xs dark:bg-jade/15"
+                          >
+                            {h.ages} {h.pillar} · {h.note}
+                          </span>
+                        )
+                      )}
+                    </div>
+                  )}
+                  {Array.isArray(t.liunian_samples) && t.liunian_samples.length > 0 && (
+                    <div className="mt-2">
+                      <p className="mb-1 text-xs text-ink-500">
+                        流年象征取样（非断言）
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {t.liunian_samples.map(
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          (x: any, i: number) => (
+                            <span
+                              key={i}
+                              className="rounded-lg bg-amber-500/10 px-2 py-1 text-xs dark:bg-amber-500/15"
+                              title={x.note}
+                            >
+                              {x.year}年 {x.pillar}
+                              {x.age != null ? ` · 约${x.age}岁` : ""}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {d.disclaimer && (
+            <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">{d.disclaimer}</p>
+          )}
+        </>
+      );
+    }
+
     default:
       return null;
   }
@@ -450,16 +666,10 @@ export default function ReadingReport() {
   const handleExport = async (mode: "md" | "print") => {
     if (!chart) return;
     // Full package (print/PDF) gated by entitlement; markdown free for structure share.
+    // 服务端在 export 端点权威校验 + 扣次(非 pro);此处 canExportFullPackage 为 UI 预检。
     if (mode === "print" && !canExportFullPackage()) {
       setError("完整交付包需开通套餐或购买次数，请前往「套餐」页（演示可一键开通）。");
       return;
-    }
-    if (mode === "print") {
-      const ok = await consumePackageCreditAsync();
-      if (!ok && getEntitlement().plan !== "pro") {
-        setError("交付包次数已用尽。");
-        return;
-      }
     }
     setExporting(true);
     setError(null);
@@ -468,18 +678,22 @@ export default function ReadingReport() {
         liunian_start_year: exportStartYear,
         liunian_years: exportYears,
       };
+      const deviceId = getDeviceId();
       const pkg =
         chart.id || (chartScopeId && chartScopeId.includes("-"))
-          ? await exportChartPackage(chart.id || chartScopeId!, rangeOpts)
-          : await exportBaziPackage({
-              bazi: chart.bazi,
-              gender: chart.gender || "male",
-              birth_date: chart.birthDate || "",
-              birth_time: chart.birthTime || "",
-              calendar_type: chart.calendarType || "solar",
-              label: chart.bazi,
-              ...rangeOpts,
-            });
+          ? await exportChartPackage(chart.id || chartScopeId!, rangeOpts, deviceId)
+          : await exportBaziPackage(
+              {
+                bazi: chart.bazi,
+                gender: chart.gender || "male",
+                birth_date: chart.birthDate || "",
+                birth_time: chart.birthTime || "",
+                calendar_type: chart.calendarType || "solar",
+                label: chart.bazi,
+                ...rangeOpts,
+              },
+              deviceId
+            );
       if (mode === "md") {
         downloadTextFile(
           pkg.markdown,
@@ -490,7 +704,12 @@ export default function ReadingReport() {
         openHtmlPrint(pkg.html);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "导出失败");
+      const msg = err instanceof Error ? err.message : "导出失败";
+      setError(
+        msg.includes("402")
+          ? "完整交付包需开通套餐或购买次数，请前往「套餐」页。"
+          : msg
+      );
     } finally {
       setExporting(false);
     }
@@ -630,6 +849,20 @@ export default function ReadingReport() {
                 <Download className="h-3.5 w-3.5" />
                 标准交付包
               </button>
+              {report && (
+                <ShareCard
+                  bazi={report.meta.bazi}
+                  genderLabel={report.meta.gender_label}
+                  dayMaster={
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (sections.find((s) => s.id === "chart")?.data as any)?.day_master
+                  }
+                  headline={
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (sections.find((s) => s.id === "chart")?.data as any)?.daymaster_trait
+                  }
+                />
+              )}
             </div>
           </div>
         </div>

@@ -149,8 +149,8 @@ def _section_yongshen(structural: Dict[str, Any]) -> Tuple[str, str]:
         f"- **忌神**:{taboo}　—— 克泄太过、带来压力与隐患的领域,需规避或化解",
         f"- **判定依据**:{basis}(参考旺衰「{strength or '—'}」、五行「{elem or '—'}」)",
         "",
-        "> 用神算法在 **n=92 真实命主**上与《穷通宝鉴》调候用神 **90.2% 一致**"
-        "(`validate_yongshen_full.py`),跨数据集稳定,可 cite。",
+        "> 用神算法对齐《穷通宝鉴》调候:n=92 真实命主 **100% 纳入调候、83.7% 完全覆盖**"
+        "(`validate_yongshen_full.py`,扶抑·调候冲突时调候独胜),跨数据集稳定,可 cite。",
     ])
     return ("用神与忌神　`✅ 确定性 · 对齐穷通宝鉴`", body)
 
@@ -198,7 +198,7 @@ def _section_liuqin(liuqin: Dict[str, Any]) -> Tuple[str, str]:
     if palace_bits:
         body_lines += ["**宫位**"] + palace_bits + [""]
     body_lines.append(
-        "> 六亲强弱由「星根是否被冲 / 合化坏」确定性判定(项目 det 层 n=39 验证 77%);"
+        "> 六亲强弱由「星根是否被冲 / 合化坏」确定性判定(项目 det 层 n=39 验证 92%);"
         "「星」看十神落柱,「宫」看地支位置,二者同参。"
     )
     return ("六亲缘分　`✅ 确定性 · 星宫同参`", "\n".join(body_lines))
@@ -617,6 +617,44 @@ def build_report(
         sections.append({
             "id": "life", "title": "人生篇章", "trust": "ai",
             "data": {"personality": personality, "domains": domain_items, "events": events},
+        })
+
+    # 5b 结构应期 shortlist（产品诚实层；有候选或六亲联动取样才出）
+    yts = result.get("year_timing_surface")
+    if isinstance(yts, dict):
+        cands = yts.get("candidates") or []
+        bridge = (yts.get("meta") or {}).get("liuqin_bridge") or {}
+        bridge_samples = bridge.get("samples") or []
+        show_yts = (
+            yts.get("display_mode") in ("hard_shortlist", "soft_hint") and cands
+        ) or (
+            yts.get("display_mode") in ("hard_shortlist", "soft_hint", "trend_only")
+            and bridge_samples
+        )
+        if show_yts:
+            sections.append({
+                "id": "year_timing",
+                "title": yts.get("product_title") or "结构应期 shortlist",
+                # Frontend TrustBadge only knows certain|ai; symbolic → certain.
+                "trust": "certain" if yts.get("display_mode") == "hard_shortlist" else "ai",
+                "data": {
+                    "display_mode": yts.get("display_mode"),
+                    "assert_single_year": False,
+                    "copy": yts.get("product_copy"),
+                    "disclaimer": yts.get("disclaimer"),
+                    "candidates": cands,
+                    "liuqin_bridge": bridge,
+                },
+            })
+
+    # 5c 六亲细断 dossier（结构 det）
+    lqd = result.get("liuqin_dossier")
+    if isinstance(lqd, dict) and isinstance(lqd.get("members"), dict):
+        sections.append({
+            "id": "liuqin_dossier",
+            "title": "六亲细断（性格·健康·应期）",
+            "trust": "certain",
+            "data": lqd,
         })
 
     # 6 财富婚姻(AI,条件)

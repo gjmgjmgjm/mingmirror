@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useChart } from "../contexts/ChartContext";
 import { analyzeBazi, type BaziAnalyzeResponse } from "../api/client";
 import ChartLoader from "../components/ChartLoader";
+import YearTimingPanel from "../components/YearTimingPanel";
+import LiuqinDossierPanel from "../components/LiuqinDossierPanel";
 import {
   SectionCard,
   InfoCard,
@@ -62,7 +64,12 @@ export default function ChartBasic() {
     setResponse(null);
 
     try {
-      const data = await analyzeBazi(chart.bazi, question.trim());
+      const data = await analyzeBazi(chart.bazi, question.trim(), {
+        gender: chart.gender || "male",
+        birthDate: chart.birthDate || "",
+        birthTime: chart.birthTime || "00:00",
+        calendarType: chart.calendarType || "solar",
+      });
       setResponse(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "分析失败";
@@ -167,6 +174,22 @@ export default function ChartBasic() {
               })}
             </div>
           </SectionCard>
+
+          <YearTimingPanel surface={result.year_timing_surface} delay={170} />
+
+          <LiuqinDossierPanel
+            dossier={result.liuqin_dossier}
+            delay={180}
+            highlightYears={(
+              result.year_timing_surface?.candidates || []
+            )
+              .map((c) => c.year)
+              .filter((y): y is number => typeof y === "number" && y > 0)
+              .concat(
+                result.year_timing_surface?.meta?.liuqin_bridge?.overlap_years ||
+                  []
+              )}
+          />
 
           {(result.wealth_level || result.marriage_status || (result.milestones && result.milestones.length > 0)) && (
             <SectionCard title="财富、婚姻与人生节点" delay={180}>
