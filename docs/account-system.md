@@ -23,6 +23,13 @@
 - 密码：**PBKDF2-HMAC-SHA256**（200k iter，stdlib，无额外依赖）
 - 会话：`secrets.token_urlsafe(32)` 不透明令牌，SQLite 存储
 - 库文件：默认 `data/mingmirror_accounts.db`（可用 `mingmirror.account_db` 配置）
+- 邮件：`server/mailer.py` + 环境变量 `MINGMIRROR_SMTP_*`；未配置时 JSON 返回 token（开发）
+
+## 我的命盘
+
+- `GET /api/v1/me/charts` — 登录用户跨设备盘列表  
+- `PATCH /api/v1/charts/{id}?label=` — 重命名  
+- 登录时 claim 本机 `device_id` 下未绑定 `user_id` 的盘
 
 ## 并发与后端
 

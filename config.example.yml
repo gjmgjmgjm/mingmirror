@@ -112,6 +112,20 @@ notifications:
 server:
   max_jobs: 500
   job_ttl_seconds: 86400   # 完成态 job 保留 24 小时
+  ai_concurrency: 4        # LLM / 重分析并发
+  export_concurrency: 2    # 交付包导出并发
+
+# 命镜产品（账号 / 邮件，可选）
+mingmirror:
+  account_db: data/mingmirror_accounts.db
+  public_base_url: ""      # 如 https://example.com — 邮件内验证链接
+  # smtp:                  # 不配则验证/重置 token 在 JSON 返回（开发态）
+  #   host: smtp.example.com
+  #   port: 587
+  #   user: apikey
+  #   password: secret
+  #   from: noreply@example.com
+  #   tls: true
 
 # 八字（命理）视频 OCR 与知识库（可选，需额外安装 rapidocr-onnxruntime）
 # 安装命令：pip install rapidocr-onnxruntime --no-deps

@@ -52,6 +52,11 @@ docker compose up --build -d
 | `MINGMIRROR_DEMO_CODE` | `demo-pro` | 套餐页开通完整版验证码 |
 | `MINGMIRROR_ADMIN_TOKEN` | 空 | 运营看板鉴权；**生产务必设置** |
 | `MINGMIRROR_WEBHOOK_SECRET` | 空 | 支付 webhook 密钥；**生产务必设置** |
+| `MINGMIRROR_ENV` | 空 | `production` 时强制 device_id / secret 启动守卫 |
+| `MINGMIRROR_SMTP_HOST` | 空 | 邮件（验证/重置）；不配则 API 返回 token |
+| `MINGMIRROR_SMTP_PORT` | `587` | SMTP 端口 |
+| `MINGMIRROR_SMTP_USER` / `PASSWORD` / `FROM` | 空 | SMTP 凭证 |
+| `MINGMIRROR_PUBLIC_BASE_URL` | 空 | 邮件内链接前缀，如 `https://your.domain` |
 | `DEEPSEEK_API_KEY` | 空 | AI 章节；结构层无 key 也可导出 |
 | `DOUYIN_PATH` | `/app/Downloaded` | 数据目录（事件/命盘 SQLite） |
 
@@ -75,6 +80,21 @@ cd web && npm install && npm run dev
 # 或使用已构建产物：访问 http://127.0.0.1:8000/app/
 cd web && npm run build
 ```
+
+## 账号与权益（生产清单）
+
+1. 设置 `MINGMIRROR_ADMIN_TOKEN` + `MINGMIRROR_WEBHOOK_SECRET` + `MINGMIRROR_ENV=production`  
+2. （推荐）配置 SMTP，否则验证/重置仅 JSON 返回 token（勿暴露公网）  
+3. 账号库：`data/mingmirror_accounts.db`（或 `mingmirror.account_db`）  
+4. 登录后权益键为 `user:<id>`；Admin 授权可用 **邮箱** 或 `user:<id>`  
+5. 冒烟：`python -m pytest tests/test_auth_e2e.py tests/test_accounts.py -q`
+
+| 路径 | 说明 |
+|------|------|
+| `/app/account` | 注册/登录/验证/重置/我的命盘 |
+| `/api/v1/auth/*` | 账号 API |
+| `/api/v1/me/charts` | 登录用户命盘列表 |
+| `/api/v1/admin/user-lookup?email=` | 运营查用户+权益 |
 
 ## 产品 API 速查
 

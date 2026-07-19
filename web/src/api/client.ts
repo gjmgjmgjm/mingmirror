@@ -344,6 +344,23 @@ export function resetPassword(payload: {
   });
 }
 
+export function fetchMyCharts(limit = 50): Promise<{
+  user_id: string;
+  count: number;
+  items: Array<{
+    id: string;
+    bazi: string;
+    label?: string;
+    gender?: string;
+    birth_date?: string;
+    birth_time?: string;
+    user_id?: string;
+    device_id?: string;
+  }>;
+}> {
+  return fetchJson(`/me/charts`, { params: { limit } });
+}
+
 export interface BaziBasicInfo {
   bazi: string;
   day_master: string;

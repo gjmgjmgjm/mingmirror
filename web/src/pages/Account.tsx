@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  fetchMyCharts,
   forgotPassword,
   requestEmailVerify,
   resetPassword,
@@ -8,13 +9,16 @@ import {
 } from "../api/client";
 import { PageHeader, SectionCard, ErrorPanel } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
+import { useChart } from "../contexts/ChartContext";
 import { setSession, type AuthUser } from "../lib/auth";
 import { refreshEntitlementFromServer } from "../lib/entitlements";
 
 export default function Account() {
   const { user, loading, login, register, logout, changePassword, refresh } =
     useAuth();
+  const { setChart } = useChart();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,6 +31,34 @@ export default function Account() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [myCharts, setMyCharts] = useState<
+    Array<{ id: string; bazi: string; label?: string; birth_date?: string }>
+  >([]);
+
+  // Deep-link from email: ?verify=token or ?reset=token
+  useEffect(() => {
+    const v = searchParams.get("verify");
+    const r = searchParams.get("reset");
+    if (v) {
+      setVerifyTok(v);
+      setMsg("检测到验证链接，请确认下方令牌后点「确认验证」。");
+    }
+    if (r) {
+      setResetTok(r);
+      setMode("forgot");
+      setMsg("检测到重置链接，请设置新密码。");
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!user) {
+      setMyCharts([]);
+      return;
+    }
+    void fetchMyCharts(30)
+      .then((res) => setMyCharts(res.items || []))
+      .catch(() => setMyCharts([]));
+  }, [user]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -250,6 +282,47 @@ export default function Account() {
             </form>
           </SectionCard>
         )}
+
+        <SectionCard title="我的命盘">
+          {myCharts.length === 0 ? (
+            <p className="text-sm text-ink-500">
+              暂无账号绑定的命盘。排盘后登录会自动认领本机 device 下的盘。
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {myCharts.map((c) => (
+                <li
+                  key={c.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-200/60 px-3 py-2 text-sm dark:border-ink-600/40"
+                >
+                  <div>
+                    <div className="font-medium text-ink-800 dark:text-ink-100">
+                      {c.label || "未命名"}
+                    </div>
+                    <div className="font-mono text-xs text-ink-500">{c.bazi}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-jade/15 px-2.5 py-1 text-xs font-medium text-jade"
+                    onClick={() => {
+                      setChart({
+                        id: c.id,
+                        bazi: c.bazi,
+                        gender: "male",
+                        birthDate: c.birth_date || "",
+                        birthTime: "",
+                        label: c.label,
+                      });
+                      navigate("/chart");
+                    }}
+                  >
+                    打开
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
 
         <SectionCard title="修改密码">
           <form onSubmit={onChangePw} className="space-y-3">

@@ -33,6 +33,7 @@ from server.accounts import AccountStore
 from server.auth_routes import register_auth_routes
 from server.concurrency import ConcurrencyHub, hub as _default_hub
 from server.jobs import JobManager, JobStatus
+from server.mailer import MailConfig, Mailer
 from storage import FileManager
 from tools.qizheng.star_tables import resolve_dignity_table
 from utils.logger import setup_logger
@@ -731,6 +732,15 @@ def build_app(config: ConfigLoader) -> FastAPI:
     except Exception as exc:  # pragma: no cover
         logger.warning("AccountStore init failed: %s", exc)
 
+    mailer = Mailer(MailConfig.from_env_and_dict(config.config if hasattr(config, "config") else {}))
+    try:
+        # Also accept top-level mingmirror from ConfigLoader.get
+        ming_cfg = config.get("mingmirror") if hasattr(config, "get") else None
+        if isinstance(ming_cfg, dict):
+            mailer = Mailer(MailConfig.from_env_and_dict({"mingmirror": ming_cfg}))
+    except Exception:
+        pass
+
     server_limits = config.get("server") or {}
     if not isinstance(server_limits, dict):
         server_limits = {}
@@ -779,6 +789,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
     app.state.deps = deps
     app.state.account_store = account_store
     app.state.concurrency = concurrency_hub
+    app.state.mailer = mailer
 
     def _merge_entitlement(user_id: str, device_id: str) -> None:
         if _product_store is None or not user_id or not device_id:
@@ -797,6 +808,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
         app,
         get_store=lambda: account_store,
         merge_entitlement=_merge_entitlement,
+        get_mailer=lambda: getattr(app.state, "mailer", None),
     )
 
     @app.get("/api/v1/health")
@@ -804,6 +816,7 @@ def build_app(config: ConfigLoader) -> FastAPI:
         return {
             "status": "ok",
             "accounts": account_store is not None,
+            "smtp": bool(getattr(mailer, "enabled", False)),
             "concurrency": concurrency_hub.stats(),
         }
 
@@ -2040,12 +2053,67 @@ def build_app(config: ConfigLoader) -> FastAPI:
         rec = _chart_store.save(rec)
         return ChartResponse(**rec.to_dict())
 
+    @app.get("/api/v1/me/charts")
+    async def list_my_charts(
+        request: Request, limit: int = 50
+    ) -> Dict[str, Any]:
+        """List charts owned by the logged-in user (cross-device)."""
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        user_id = _optional_user_id(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="login required")
+        items = _chart_store.list(limit=limit, user_id=user_id)
+        return {
+            "user_id": user_id,
+            "count": len(items),
+            "items": [c.to_dict() for c in items],
+        }
+
+    @app.patch("/api/v1/charts/{chart_id}")
+    async def rename_chart(
+        request: Request,
+        chart_id: str,
+        device_id: str = "",
+        label: str = "",
+    ) -> ChartResponse:
+        """Rename a chart (owner: user or device)."""
+        if _chart_store is None:
+            raise HTTPException(status_code=503, detail="chart store not available")
+        from tools.destiny.chart_store import is_chart_uuid
+
+        if not is_chart_uuid(chart_id):
+            raise HTTPException(status_code=400, detail="chart_id must be UUID")
+        user_id = _optional_user_id(request)
+        did = _require_device_id(device_id, soft=True)
+        try:
+            rec = _chart_store.assert_device_access(
+                chart_id,
+                did,
+                user_id=user_id,
+                allow_legacy_empty=not _is_production,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chart not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if (label or "").strip():
+            rec.label = label.strip()[:128]
+            rec = _chart_store.save(rec)
+        return ChartResponse(**rec.to_dict())
+
     @app.get("/api/v1/charts", response_model=List[ChartResponse])
     async def list_charts(
-        limit: int = 50, device_id: str = ""
+        request: Request, limit: int = 50, device_id: str = ""
     ) -> List[ChartResponse]:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
+        user_id = _optional_user_id(request)
+        if user_id:
+            return [
+                ChartResponse(**c.to_dict())
+                for c in _chart_store.list(limit=limit, user_id=user_id)
+            ]
         did = _require_device_id(device_id, soft=not _is_production)
         # Production: only list charts for this device. Dev without device_id:
         # empty list rather than leaking all charts.
@@ -2057,20 +2125,28 @@ def build_app(config: ConfigLoader) -> FastAPI:
         ]
 
     @app.get("/api/v1/charts/{chart_id}", response_model=ChartResponse)
-    async def get_chart(chart_id: str, device_id: str = "") -> ChartResponse:
+    async def get_chart(
+        request: Request, chart_id: str, device_id: str = ""
+    ) -> ChartResponse:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
-        _assert_chart_device_access(chart_id, device_id)
+        _assert_chart_device_access(
+            chart_id, device_id, user_id=_optional_user_id(request)
+        )
         rec = _chart_store.get(chart_id.strip())
         if rec is None:
             raise HTTPException(status_code=404, detail="chart not found")
         return ChartResponse(**rec.to_dict())
 
     @app.delete("/api/v1/charts/{chart_id}")
-    async def delete_chart(chart_id: str, device_id: str = "") -> Dict[str, Any]:
+    async def delete_chart(
+        request: Request, chart_id: str, device_id: str = ""
+    ) -> Dict[str, Any]:
         if _chart_store is None:
             raise HTTPException(status_code=503, detail="chart store not available")
-        _assert_chart_device_access(chart_id, device_id)
+        _assert_chart_device_access(
+            chart_id, device_id, user_id=_optional_user_id(request)
+        )
         ok = _chart_store.delete(chart_id.strip())
         if not ok:
             raise HTTPException(status_code=404, detail="chart not found")
@@ -2315,23 +2391,83 @@ def build_app(config: ConfigLoader) -> FastAPI:
     async def admin_grant_entitlement(
         request: Request, req: AdminGrantRequest
     ) -> Dict[str, Any]:
-        """Manually grant pro or package credits (ops tooling)."""
+        """Manually grant pro or package credits (ops tooling).
+
+        ``device_id`` may be a browser device id, ``user:<uuid>``, or a registered email.
+        """
         _require_admin(request)
         if _product_store is None:
             raise HTTPException(status_code=503, detail="product store not available")
-        device_id = (req.device_id or "").strip()
-        if not device_id:
+        raw = (req.device_id or "").strip()
+        if not raw:
             raise HTTPException(status_code=400, detail="device_id required")
+        scope = raw
+        # Resolve email → user:<id>
+        if "@" in raw and account_store is not None:
+            try:
+                from server.accounts import validate_email
+
+                em = validate_email(raw)
+                row = account_store._conn.execute(
+                    "SELECT id FROM account_user WHERE email = ?", (em,)
+                ).fetchone()
+                if row:
+                    scope = f"user:{row['id']}"
+            except Exception:
+                pass
+        elif raw.startswith("user:"):
+            scope = raw
         try:
             rec = _product_store.admin_grant(
-                device_id,
+                scope,
                 action=req.action,
                 days=max(1, min(req.days, 365)),
                 credits=max(1, min(req.credits, 50)),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, "entitlement": rec.to_dict()}
+        return {"ok": True, "entitlement": rec.to_dict(), "scope_key": scope}
+
+    @app.get("/api/v1/admin/user-lookup")
+    async def admin_user_lookup(
+        request: Request, email: str = "", user_id: str = ""
+    ) -> Dict[str, Any]:
+        """Resolve email/user_id to account + entitlement scope (ops)."""
+        _require_admin(request)
+        if account_store is None:
+            raise HTTPException(status_code=503, detail="account store unavailable")
+        user = None
+        if user_id.strip():
+            user = account_store.get_user(user_id.strip())
+        elif email.strip():
+            try:
+                from server.accounts import validate_email
+
+                em = validate_email(email)
+                row = account_store._conn.execute(
+                    "SELECT * FROM account_user WHERE email = ?", (em,)
+                ).fetchone()
+                if row:
+                    user = account_store._row_user(row)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        scope = f"user:{user.id}"
+        ent = None
+        if _product_store is not None:
+            ent = _product_store.get_entitlement(scope).to_dict()
+        devices = account_store.devices_for_user(user.id)
+        charts = []
+        if _chart_store is not None:
+            charts = [c.to_dict() for c in _chart_store.list(limit=20, user_id=user.id)]
+        return {
+            "user": user.to_public(),
+            "scope_key": scope,
+            "devices": devices,
+            "entitlement": ent,
+            "charts": charts,
+        }
 
     @app.post("/api/v1/product/checkout")
     async def product_checkout(

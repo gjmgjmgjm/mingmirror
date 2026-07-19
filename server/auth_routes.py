@@ -2,7 +2,7 @@
 """HTTP routes for MingMirror account system."""
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional  # noqa: F401 — Any used by get_mailer
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -65,6 +65,7 @@ def register_auth_routes(
     *,
     get_store: Callable[[], Optional[AccountStore]],
     merge_entitlement: Optional[Callable[[str, str], None]] = None,
+    get_mailer: Optional[Callable[[], Any]] = None,
 ) -> None:
     """Mount /api/v1/auth/* routes."""
 
@@ -73,6 +74,14 @@ def register_auth_routes(
         if store is None:
             raise HTTPException(status_code=503, detail="account store unavailable")
         return store
+
+    def _mailer():
+        if get_mailer is None:
+            return None
+        try:
+            return get_mailer()
+        except Exception:
+            return None
 
     def _user_from_request(
         authorization: Optional[str] = None,
@@ -104,15 +113,24 @@ def register_auth_routes(
                 merge_entitlement(user.id, req.device_id.strip())
             except Exception:
                 pass
-        return {
+        mailed = False
+        mailer = _mailer()
+        if mailer is not None and getattr(mailer, "enabled", False):
+            mailed = bool(mailer.send_verify_email(user.email, verify_token))
+        body: Dict[str, Any] = {
             "user": user.to_public(),
             "token": session.token,
             "expires_at": session.expires_at,
             "token_type": "bearer",
-            # Dev / no-SMTP: return token so clients can complete verify without mail.
-            "email_verify_token": verify_token,
-            "email_verify_hint": "No SMTP configured; use email_verify_token with /auth/verify-email",
+            "email_sent": mailed,
         }
+        # Always return token when SMTP off or send failed (dev / resilience).
+        if not mailed:
+            body["email_verify_token"] = verify_token
+            body["email_verify_hint"] = (
+                "No SMTP or send failed; use email_verify_token with /auth/verify-email"
+            )
+        return body
 
     @app.post("/api/v1/auth/login")
     async def auth_login(req: LoginRequest) -> Dict[str, Any]:
@@ -199,17 +217,21 @@ def register_auth_routes(
         authorization: Optional[str] = Header(default=None),
         x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
     ) -> Dict[str, Any]:
-        """Re-issue email verification token (no SMTP: token returned in JSON)."""
+        """Re-issue email verification token; SMTP when configured."""
         user, _ = _user_from_request(authorization, x_session_token)
         try:
             token = _store().request_email_verification(user.id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "ok": True,
-            "email_verify_token": token,
-            "email_verify_hint": "No SMTP; POST token to /auth/verify-email",
-        }
+        mailed = False
+        mailer = _mailer()
+        if mailer is not None and getattr(mailer, "enabled", False):
+            mailed = bool(mailer.send_verify_email(user.email, token))
+        body: Dict[str, Any] = {"ok": True, "email_sent": mailed}
+        if not mailed:
+            body["email_verify_token"] = token
+            body["email_verify_hint"] = "No SMTP; POST token to /auth/verify-email"
+        return body
 
     @app.post("/api/v1/auth/verify-email")
     async def auth_verify_email(req: VerifyEmailRequest) -> Dict[str, Any]:
@@ -226,11 +248,20 @@ def register_auth_routes(
         body: Dict[str, Any] = {
             "ok": True,
             "message": "If the email is registered, a reset token was issued.",
+            "email_sent": False,
         }
-        # Dev / no-SMTP: include token when present so product can complete flow.
         if info:
-            body["reset_token"] = info["token"]
-            body["reset_hint"] = "No SMTP; POST reset_token + new_password to /auth/reset-password"
+            mailed = False
+            mailer = _mailer()
+            if mailer is not None and getattr(mailer, "enabled", False):
+                mailed = bool(mailer.send_reset_password(info["email"], info["token"]))
+            body["email_sent"] = mailed
+            # Dev / send-fail: include token so product can complete flow.
+            if not mailed:
+                body["reset_token"] = info["token"]
+                body["reset_hint"] = (
+                    "No SMTP; POST reset_token + new_password to /auth/reset-password"
+                )
         return body
 
     @app.post("/api/v1/auth/reset-password")
